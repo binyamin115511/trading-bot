@@ -3,48 +3,54 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Trading Bot</title>
+<title>ICT Trading Bot</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; padding: 16px; }
-  h1 { text-align: center; font-size: 1.6rem; margin-bottom: 8px; color: #58a6ff; }
-  .demo-banner { text-align: center; font-size: 0.82rem; background: #1a2d1a; border: 1px solid #3fb950; border-radius: 8px; padding: 7px 14px; margin-bottom: 16px; color: #3fb950; }
-  .top-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px; text-align: center; }
+  h1 { text-align: center; font-size: 1.5rem; margin-bottom: 6px; color: #58a6ff; }
+  .demo-banner { text-align: center; font-size: 0.8rem; background: #1a2d1a; border: 1px solid #3fb950; border-radius: 8px; padding: 6px 14px; margin-bottom: 14px; color: #3fb950; }
+  .top-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; text-align: center; }
   .card.demo-card { border-color: #3fb950; }
-  .card .label { font-size: 0.75rem; color: #8b949e; margin-bottom: 5px; }
-  .card .value { font-size: 1.4rem; font-weight: bold; }
+  .label { font-size: 0.72rem; color: #8b949e; margin-bottom: 4px; }
+  .value { font-size: 1.3rem; font-weight: bold; }
   .pnl-pos { color: #3fb950; }
   .pnl-neg { color: #f85149; }
-  .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-left: 5px; }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 4px; }
   .dot-green { background: #3fb950; animation: pulse 1.5s infinite; }
   .dot-red { background: #f85149; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-  .buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
-  button { padding: 10px 20px; border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
+  button { padding: 9px 18px; border: none; border-radius: 8px; font-size: 0.88rem; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
   button:hover { opacity: 0.8; }
   .btn-start { background: #238636; color: white; }
-  .btn-stop { background: #da3633; color: white; }
+  .btn-stop  { background: #da3633; color: white; }
   .btn-reset { background: #30363d; color: #e6edf3; }
-  .section { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
-  .section h3 { font-size: 0.85rem; color: #8b949e; margin-bottom: 10px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-  th, td { padding: 8px 10px; border-bottom: 1px solid #21262d; text-align: right; }
-  th { color: #8b949e; font-weight: 600; font-size: 0.75rem; }
-  .buy { color: #3fb950; font-weight: bold; }
+  .section { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .section h3 { font-size: 0.82rem; color: #8b949e; margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  th, td { padding: 7px 8px; border-bottom: 1px solid #21262d; text-align: right; }
+  th { color: #8b949e; font-weight: 600; font-size: 0.72rem; }
+  .buy  { color: #3fb950; font-weight: bold; }
   .sell { color: #f85149; font-weight: bold; }
   .hold { color: #d29922; }
-  .long-badge { background: #1f3d1f; color: #3fb950; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; }
+  .bull { color: #3fb950; }
+  .bear { color: #f85149; }
+  .range { color: #8b949e; }
+  .badge { border-radius: 4px; padding: 2px 5px; font-size: 0.68rem; font-weight: bold; }
+  .badge-green { background: #1f3d1f; color: #3fb950; }
+  .badge-red   { background: #3d1f1f; color: #f85149; }
+  .badge-gray  { background: #21262d; color: #8b949e; }
   .profit-pos { color: #3fb950; }
   .profit-neg { color: #f85149; }
-  .active-row { background: rgba(88,166,255,0.05); }
-  #log { font-size: 0.7rem; color: #8b949e; text-align: center; margin-top: 8px; }
-  canvas { width: 100% !important; height: 180px !important; }
+  #log { font-size: 0.68rem; color: #8b949e; text-align: center; margin-top: 8px; }
+  canvas { width: 100% !important; height: 160px !important; }
+  .score-bar { display: inline-block; height: 6px; background: #3fb950; border-radius: 3px; vertical-align: middle; }
 </style>
 </head>
 <body>
-<h1>🤖 AI Trading Bot</h1>
-<div class="demo-banner">🎮 מצב דמו — ללא כסף אמיתי | יתרה התחלתית $1,000</div>
+<h1>🧠 ICT Trading Bot</h1>
+<div class="demo-banner">🎮 מצב דמו — ללא כסף אמיתי | אסטרטגיה: ICT (FVG + Liquidity Sweep + BOS)</div>
 
 <div class="top-grid">
   <div class="card demo-card">
@@ -57,7 +63,7 @@
   </div>
   <div class="card">
     <div class="label">סטטוס</div>
-    <div class="value" id="status">עצור<span class="status-dot dot-red"></span></div>
+    <div class="value" id="status">—</div>
   </div>
   <div class="card">
     <div class="label">פוזיציות פתוחות</div>
@@ -75,29 +81,35 @@
 
 <div class="buttons">
   <button class="btn-start" onclick="action('start')">▶ הפעל</button>
-  <button class="btn-stop" onclick="action('stop')">■ עצור</button>
+  <button class="btn-stop"  onclick="action('stop')">■ עצור</button>
   <button class="btn-reset" onclick="resetDemo()">↺ אפס דמו</button>
 </div>
 
 <div class="section">
-  <h3>📊 מטבעות בזמן אמת</h3>
+  <h3>📊 ניתוח ICT לכל מטבע</h3>
   <table>
     <thead>
-      <tr><th>מטבע</th><th>מחיר</th><th>סיגנל AI</th><th>פוזיציה</th><th>כניסה</th></tr>
+      <tr>
+        <th>מטבע</th><th>מחיר</th><th>Bias</th>
+        <th>Sweep</th><th>BOS</th><th>FVG</th>
+        <th>סקור</th><th>סיגנל</th><th>פוזיציה</th>
+      </tr>
     </thead>
     <tbody id="coinsTable"></tbody>
   </table>
 </div>
 
 <div class="section">
-  <h3>📈 גרף מחיר BTC</h3>
+  <h3>📈 גרף BTC</h3>
   <canvas id="chart"></canvas>
 </div>
 
 <div class="section">
-  <h3>📋 היסטוריית עסקאות</h3>
+  <h3>📋 היסטוריית עסקאות ICT</h3>
   <table>
-    <thead><tr><th>שעה</th><th>מטבע</th><th>סיבה</th><th>רווח/הפסד</th><th>יתרה</th></tr></thead>
+    <thead>
+      <tr><th>שעה</th><th>מטבע</th><th>סיבה</th><th>כניסה</th><th>יציאה</th><th>סקור</th><th>רווח/הפסד</th><th>יתרה</th></tr>
+    </thead>
     <tbody id="historyTable"></tbody>
   </table>
 </div>
@@ -106,102 +118,93 @@
 <script>
 const btcPrices = [];
 let ctx;
+const REASON_HE = { signal:'סיגנל','stop-loss':'סטופ לוס','take-profit':'טייק פרופיט','signal-exit':'יציאה' };
 
-const SIGNAL_HE = { buy: 'קנה', sell: 'מכור', hold: 'המתן' };
-const REASON_HE = { signal: 'סיגנל', 'stop-loss': 'סטופ לוס', 'take-profit': 'טייק פרופיט' };
-
-function initChart() {
-  ctx = document.getElementById('chart').getContext('2d');
-}
+function initChart() { ctx = document.getElementById('chart').getContext('2d'); }
 
 function drawChart() {
   if (!ctx || btcPrices.length < 2) return;
   const canvas = document.getElementById('chart');
-  canvas.width = canvas.offsetWidth;
-  canvas.height = 180;
+  canvas.width = canvas.offsetWidth; canvas.height = 160;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const min = Math.min(...btcPrices) * 0.9997;
   const max = Math.max(...btcPrices) * 1.0003;
   const w = canvas.width, h = canvas.height;
-  const x = (i) => (i / (btcPrices.length - 1)) * w;
-  const y = (p) => h - ((p - min) / (max - min)) * h;
-
+  const x = i => (i / (btcPrices.length - 1)) * w;
+  const y = p => h - ((p - min) / (max - min)) * h;
   ctx.fillStyle = 'rgba(88,166,255,0.07)';
   ctx.beginPath();
-  btcPrices.forEach((p, i) => i === 0 ? ctx.moveTo(x(i), y(p)) : ctx.lineTo(x(i), y(p)));
-  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
-
-  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2;
+  btcPrices.forEach((p,i) => i===0 ? ctx.moveTo(x(i),y(p)) : ctx.lineTo(x(i),y(p)));
+  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.fill();
+  ctx.strokeStyle='#58a6ff'; ctx.lineWidth=2;
   ctx.beginPath();
-  btcPrices.forEach((p, i) => i === 0 ? ctx.moveTo(x(i), y(p)) : ctx.lineTo(x(i), y(p)));
+  btcPrices.forEach((p,i) => i===0 ? ctx.moveTo(x(i),y(p)) : ctx.lineTo(x(i),y(p)));
   ctx.stroke();
 }
 
-function updateUI(d) {
+function badge(val, trueClass, falseClass, trueText, falseText) {
+  return val
+    ? `<span class="badge ${trueClass}">${trueText}</span>`
+    : `<span class="badge ${falseClass}">${falseText}</span>`;
+}
+
+function scoreBar(score) {
+  const pct = Math.min(100, Math.max(0, (score / 7) * 100));
+  const color = score >= 5 ? '#3fb950' : score >= 3 ? '#d29922' : '#f85149';
+  return `<span style="display:inline-flex;align-items:center;gap:4px">
+    <span style="width:40px;height:5px;background:#21262d;border-radius:3px;display:inline-block">
+      <span style="width:${pct}%;height:100%;background:${color};border-radius:3px;display:block"></span>
+    </span>
+    <b style="color:${color}">${score}</b>
+  </span>`;
+}
+
+function updateUI(status, coins) {
   document.getElementById('demoBalance').textContent =
-    '$' + d.demo_balance.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-
-  const pnl = d.demo_pnl;
+    '$' + status.demo_balance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pnl = status.demo_pnl || 0;
   const pnlEl = document.getElementById('demoPnl');
-  pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-  pnlEl.className = 'value ' + (pnl >= 0 ? 'pnl-pos' : 'pnl-neg');
-
-  document.getElementById('status').innerHTML = d.running
+  pnlEl.textContent = (pnl>=0?'+':'-') + '$' + Math.abs(pnl).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  pnlEl.className = 'value ' + (pnl>=0?'pnl-pos':'pnl-neg');
+  document.getElementById('status').innerHTML = status.running
     ? `פעיל<span class="status-dot dot-green"></span>`
     : `עצור<span class="status-dot dot-red"></span>`;
-  document.getElementById('openCount').textContent = d.open_count || 0;
-  document.getElementById('winrate').textContent = d.total_trades ? (d.win_rate * 100).toFixed(1) + '%' : '—';
-  document.getElementById('trades').textContent = d.total_trades || 0;
+  document.getElementById('openCount').textContent = (status.open_positions||[]).length;
+  document.getElementById('winrate').textContent = status.total_trades ? (status.win_rate*100).toFixed(1)+'%' : '—';
+  document.getElementById('trades').textContent = status.total_trades||0;
 
-  const tbody = document.getElementById('coinsTable');
-  tbody.innerHTML = (d.coins || []).map(c => {
-    const sigClass = c.signal || 'hold';
-    const price = c.price ? '$' + c.price.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
-    const entry = c.entry ? '$' + c.entry.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
-    const position = c.position ? '<span class="long-badge">LONG</span>' : '—';
+  document.getElementById('coinsTable').innerHTML = coins.map(c => {
+    const price = c.price ? '$'+c.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4}) : '—';
+    const biasClass = c.bias==='bullish'?'bull':c.bias==='bearish'?'bear':'range';
+    const biasHe = c.bias==='bullish'?'שורי 📈':c.bias==='bearish'?'דובי 📉':'ניטרל';
+    const sigClass = c.signal==='buy'?'buy':c.signal==='sell'?'sell':'hold';
+    const sigHe = c.signal==='buy'?'קנה':c.signal==='sell'?'מכור':'המתן';
+    const pos = c.position ? `<span class="badge badge-green">LONG</span>` : '—';
     return `<tr>
-      <td><b>${c.symbol.replace('/USDT','')}</b></td>
+      <td><b>${c.symbol}</b></td>
       <td>${price}</td>
-      <td class="${sigClass}">${SIGNAL_HE[c.signal] || c.signal}</td>
-      <td>${position}</td>
-      <td>${entry}</td>
+      <td class="${biasClass}">${biasHe}</td>
+      <td>${badge(c.sweep,'badge-green','badge-gray','✓ Sweep','—')}</td>
+      <td>${badge(c.bos,'badge-green','badge-gray','✓ BOS','—')}</td>
+      <td>${badge(c.fvg,'badge-green','badge-gray','✓ FVG','—')}</td>
+      <td>${scoreBar(c.score||0)}</td>
+      <td class="${sigClass}">${sigHe}</td>
+      <td>${pos}</td>
     </tr>`;
   }).join('');
 
-  const btc = (d.coins || []).find(c => c.symbol === 'BTC/USDT');
-  if (btc && btc.price) {
-    btcPrices.push(btc.price);
-    if (btcPrices.length > 100) btcPrices.shift();
-    drawChart();
-  }
+  const btc = coins.find(c=>c.symbol==='BTC');
+  if (btc && btc.price) { btcPrices.push(btc.price); if(btcPrices.length>100)btcPrices.shift(); drawChart(); }
 }
 
 async function poll() {
   try {
-    const [statusRes, coinsRes] = await Promise.all([
-      fetch('/status'),
-      fetch('/coins')
-    ]);
-    const status = await statusRes.json();
-    let coins = [];
-    if (coinsRes.ok) coins = await coinsRes.json();
-    updateUI({ ...status, coins, demo_pnl: status.demo_pnl || 0, open_count: (status.open_positions||[]).length });
-    document.getElementById('log').textContent = 'מתעדכן אוטומטית ✓ ' + new Date().toLocaleTimeString('he-IL');
-  } catch(e) {
-    document.getElementById('log').textContent = 'שגיאה — מנסה שוב...';
-  }
-}
-
-function connect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => document.getElementById('log').textContent = 'מחובר בזמן אמת ✓';
-  ws.onclose = () => {
-    document.getElementById('log').textContent = 'משתמש בעדכון אוטומטי...';
-  };
-  ws.onmessage = (ev) => {
-    try { updateUI(JSON.parse(ev.data)); } catch(e) {}
-  };
+    const [sr, cr] = await Promise.all([fetch('/status'), fetch('/coins')]);
+    const status = await sr.json();
+    const coins  = await cr.json();
+    updateUI(status, coins);
+    document.getElementById('log').textContent = 'ICT Bot פעיל ✓  ' + new Date().toLocaleTimeString('he-IL');
+  } catch(e) { document.getElementById('log').textContent = 'שגיאה — מנסה שוב...'; }
 }
 
 async function fetchHistory() {
@@ -211,30 +214,24 @@ async function fetchHistory() {
     <tr>
       <td>${new Date(t.time).toLocaleTimeString('he-IL')}</td>
       <td><b>${(t.symbol||'').replace('/USDT','')}</b></td>
-      <td>${REASON_HE[t.reason] || t.reason || '—'}</td>
-      <td class="${t.profit >= 0 ? 'profit-pos' : 'profit-neg'}">${t.profit >= 0 ? '+' : ''}${(t.profit * 100).toFixed(2)}%</td>
-      <td>$${t.balance?.toLocaleString(undefined,{minimumFractionDigits:0}) || '—'}</td>
-    </tr>
-  `).join('');
+      <td>${REASON_HE[t.reason]||t.reason}</td>
+      <td>$${(t.entry||0).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+      <td>$${(t.exit||0).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+      <td><b>${t.score||'—'}</b></td>
+      <td class="${t.profit>=0?'profit-pos':'profit-neg'}">${t.profit>=0?'+':''}${(t.profit*100).toFixed(2)}%</td>
+      <td>$${(t.balance||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+    </tr>`).join('');
 }
 
-async function action(a) {
-  await fetch('/' + a, {method: 'POST'});
-  setTimeout(poll, 500);
-}
-
+async function action(a) { await fetch('/'+a,{method:'POST'}); setTimeout(poll,500); }
 async function resetDemo() {
-  if (!confirm('לאפס את חשבון הדמו? כל ההיסטוריה תימחק.')) return;
-  await fetch('/reset-demo', {method: 'POST'});
-  fetchHistory();
+  if(!confirm('לאפס?')) return;
+  await fetch('/reset-demo',{method:'POST'}); poll(); fetchHistory();
 }
 
-initChart();
-connect();
-poll();
-fetchHistory();
-setInterval(poll, 4000);
-setInterval(fetchHistory, 10000);
+initChart(); poll(); fetchHistory();
+setInterval(poll, 5000);
+setInterval(fetchHistory, 15000);
 </script>
 </body>
 </html>
