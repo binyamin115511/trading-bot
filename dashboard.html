@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Trading Bot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; padding: 16px; }
+  h1 { text-align: center; font-size: 1.6rem; margin-bottom: 8px; color: #58a6ff; }
+  .demo-banner { text-align: center; font-size: 0.82rem; background: #1a2d1a; border: 1px solid #3fb950; border-radius: 8px; padding: 7px 14px; margin-bottom: 16px; color: #3fb950; }
+  .top-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px; text-align: center; }
+  .card.demo-card { border-color: #3fb950; }
+  .card .label { font-size: 0.75rem; color: #8b949e; margin-bottom: 5px; }
+  .card .value { font-size: 1.4rem; font-weight: bold; }
+  .pnl-pos { color: #3fb950; }
+  .pnl-neg { color: #f85149; }
+  .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-left: 5px; }
+  .dot-green { background: #3fb950; animation: pulse 1.5s infinite; }
+  .dot-red { background: #f85149; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+  button { padding: 10px 20px; border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
+  button:hover { opacity: 0.8; }
+  .btn-start { background: #238636; color: white; }
+  .btn-stop { background: #da3633; color: white; }
+  .btn-reset { background: #30363d; color: #e6edf3; }
+  .section { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .section h3 { font-size: 0.85rem; color: #8b949e; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #21262d; text-align: right; }
+  th { color: #8b949e; font-weight: 600; font-size: 0.75rem; }
+  .buy { color: #3fb950; font-weight: bold; }
+  .sell { color: #f85149; font-weight: bold; }
+  .hold { color: #d29922; }
+  .long-badge { background: #1f3d1f; color: #3fb950; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; }
+  .profit-pos { color: #3fb950; }
+  .profit-neg { color: #f85149; }
+  .active-row { background: rgba(88,166,255,0.05); }
+  #log { font-size: 0.7rem; color: #8b949e; text-align: center; margin-top: 8px; }
+  canvas { width: 100% !important; height: 180px !important; }
+</style>
+</head>
+<body>
+<h1>🤖 AI Trading Bot</h1>
+<div class="demo-banner">🎮 מצב דמו — ללא כסף אמיתי | יתרה התחלתית $1,000</div>
+
+<div class="top-grid">
+  <div class="card demo-card">
+    <div class="label">יתרה דמו</div>
+    <div class="value" id="demoBalance">$1,000</div>
+  </div>
+  <div class="card demo-card">
+    <div class="label">רווח / הפסד</div>
+    <div class="value" id="demoPnl">$0.00</div>
+  </div>
+  <div class="card">
+    <div class="label">סטטוס</div>
+    <div class="value" id="status">עצור<span class="status-dot dot-red"></span></div>
+  </div>
+  <div class="card">
+    <div class="label">פוזיציות פתוחות</div>
+    <div class="value" id="openCount">0</div>
+  </div>
+  <div class="card">
+    <div class="label">אחוז ניצחון</div>
+    <div class="value" id="winrate">—</div>
+  </div>
+  <div class="card">
+    <div class="label">סך עסקאות</div>
+    <div class="value" id="trades">0</div>
+  </div>
+</div>
+
+<div class="buttons">
+  <button class="btn-start" onclick="action('start')">▶ הפעל</button>
+  <button class="btn-stop" onclick="action('stop')">■ עצור</button>
+  <button class="btn-reset" onclick="resetDemo()">↺ אפס דמו</button>
+</div>
+
+<div class="section">
+  <h3>📊 מטבעות בזמן אמת</h3>
+  <table>
+    <thead>
+      <tr><th>מטבע</th><th>מחיר</th><th>סיגנל AI</th><th>פוזיציה</th><th>כניסה</th></tr>
+    </thead>
+    <tbody id="coinsTable"></tbody>
+  </table>
+</div>
+
+<div class="section">
+  <h3>📈 גרף מחיר BTC</h3>
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="section">
+  <h3>📋 היסטוריית עסקאות</h3>
+  <table>
+    <thead><tr><th>שעה</th><th>מטבע</th><th>סיבה</th><th>רווח/הפסד</th><th>יתרה</th></tr></thead>
+    <tbody id="historyTable"></tbody>
+  </table>
+</div>
+<div id="log">מתחבר...</div>
+
+<script>
+const btcPrices = [];
+let ctx;
+
+const SIGNAL_HE = { buy: 'קנה', sell: 'מכור', hold: 'המתן' };
+const REASON_HE = { signal: 'סיגנל', 'stop-loss': 'סטופ לוס', 'take-profit': 'טייק פרופיט' };
+
+function initChart() {
+  ctx = document.getElementById('chart').getContext('2d');
+}
+
+function drawChart() {
+  if (!ctx || btcPrices.length < 2) return;
+  const canvas = document.getElementById('chart');
+  canvas.width = canvas.offsetWidth;
+  canvas.height = 180;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const min = Math.min(...btcPrices) * 0.9997;
+  const max = Math.max(...btcPrices) * 1.0003;
+  const w = canvas.width, h = canvas.height;
+  const x = (i) => (i / (btcPrices.length - 1)) * w;
+  const y = (p) => h - ((p - min) / (max - min)) * h;
+
+  ctx.fillStyle = 'rgba(88,166,255,0.07)';
+  ctx.beginPath();
+  btcPrices.forEach((p, i) => i === 0 ? ctx.moveTo(x(i), y(p)) : ctx.lineTo(x(i), y(p)));
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  btcPrices.forEach((p, i) => i === 0 ? ctx.moveTo(x(i), y(p)) : ctx.lineTo(x(i), y(p)));
+  ctx.stroke();
+}
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => document.getElementById('log').textContent = 'מחובר בזמן אמת ✓';
+  ws.onclose = () => {
+    document.getElementById('log').textContent = 'מנותק — מתחבר מחדש...';
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+
+    // top stats
+    document.getElementById('demoBalance').textContent =
+      '$' + d.demo_balance.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+
+    const pnl = d.demo_pnl;
+    const pnlEl = document.getElementById('demoPnl');
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    pnlEl.className = 'value ' + (pnl >= 0 ? 'pnl-pos' : 'pnl-neg');
+
+    document.getElementById('status').innerHTML = d.running
+      ? `פעיל<span class="status-dot dot-green"></span>`
+      : `עצור<span class="status-dot dot-red"></span>`;
+    document.getElementById('openCount').textContent = d.open_count;
+    document.getElementById('winrate').textContent = d.total_trades ? (d.win_rate * 100).toFixed(1) + '%' : '—';
+    document.getElementById('trades').textContent = d.total_trades;
+
+    // coins table
+    const tbody = document.getElementById('coinsTable');
+    tbody.innerHTML = (d.coins || []).map(c => {
+      const isActive = c.symbol === d.active_symbol;
+      const sigClass = c.signal || 'hold';
+      const price = c.price ? '$' + c.price.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
+      const entry = c.entry ? '$' + c.entry.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
+      const position = c.position ? '<span class="long-badge">LONG</span>' : '—';
+      return `<tr class="${isActive ? 'active-row' : ''}">
+        <td><b>${c.symbol.replace('/USDT','')}</b></td>
+        <td>${price}</td>
+        <td class="${sigClass}">${SIGNAL_HE[c.signal] || c.signal}</td>
+        <td>${position}</td>
+        <td>${entry}</td>
+      </tr>`;
+    }).join('');
+
+    // BTC chart
+    const btc = (d.coins || []).find(c => c.symbol === 'BTC/USDT');
+    if (btc && btc.price) {
+      btcPrices.push(btc.price);
+      if (btcPrices.length > 100) btcPrices.shift();
+      drawChart();
+    }
+  };
+}
+
+async function fetchHistory() {
+  const r = await fetch('/history');
+  const data = await r.json();
+  document.getElementById('historyTable').innerHTML = data.slice(-20).reverse().map(t => `
+    <tr>
+      <td>${new Date(t.time).toLocaleTimeString('he-IL')}</td>
+      <td><b>${(t.symbol||'').replace('/USDT','')}</b></td>
+      <td>${REASON_HE[t.reason] || t.reason || '—'}</td>
+      <td class="${t.profit >= 0 ? 'profit-pos' : 'profit-neg'}">${t.profit >= 0 ? '+' : ''}${(t.profit * 100).toFixed(2)}%</td>
+      <td>$${t.balance?.toLocaleString(undefined,{minimumFractionDigits:0}) || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+async function action(a) {
+  await fetch('/' + a, {method: 'POST'});
+}
+
+async function resetDemo() {
+  if (!confirm('לאפס את חשבון הדמו? כל ההיסטוריה תימחק.')) return;
+  await fetch('/reset-demo', {method: 'POST'});
+  fetchHistory();
+}
+
+initChart();
+connect();
+fetchHistory();
+setInterval(fetchHistory, 15000);
+</script>
+</body>
+</html>
