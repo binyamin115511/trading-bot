@@ -157,6 +157,20 @@ def reset_demo():
     return {"status": "reset", "balance": DEMO_BALANCE}
 
 
+@app.get("/coins")
+def coins_endpoint():
+    return [
+        {
+            "symbol": s,
+            "price": coin_state[s]["last_price"],
+            "signal": coin_state[s]["last_signal"],
+            "position": coin_state[s]["position"],
+            "entry": coin_state[s]["entry"],
+        }
+        for s in SYMBOLS
+    ]
+
+
 @app.post("/mode/{mode}")
 def set_mode(mode: str):
     if mode not in ("demo", "auto", "manual"):

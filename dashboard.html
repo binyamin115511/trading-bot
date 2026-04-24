@@ -137,58 +137,70 @@ function drawChart() {
   ctx.stroke();
 }
 
+function updateUI(d) {
+  document.getElementById('demoBalance').textContent =
+    '$' + d.demo_balance.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  const pnl = d.demo_pnl;
+  const pnlEl = document.getElementById('demoPnl');
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+  pnlEl.className = 'value ' + (pnl >= 0 ? 'pnl-pos' : 'pnl-neg');
+
+  document.getElementById('status').innerHTML = d.running
+    ? `פעיל<span class="status-dot dot-green"></span>`
+    : `עצור<span class="status-dot dot-red"></span>`;
+  document.getElementById('openCount').textContent = d.open_count || 0;
+  document.getElementById('winrate').textContent = d.total_trades ? (d.win_rate * 100).toFixed(1) + '%' : '—';
+  document.getElementById('trades').textContent = d.total_trades || 0;
+
+  const tbody = document.getElementById('coinsTable');
+  tbody.innerHTML = (d.coins || []).map(c => {
+    const sigClass = c.signal || 'hold';
+    const price = c.price ? '$' + c.price.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
+    const entry = c.entry ? '$' + c.entry.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
+    const position = c.position ? '<span class="long-badge">LONG</span>' : '—';
+    return `<tr>
+      <td><b>${c.symbol.replace('/USDT','')}</b></td>
+      <td>${price}</td>
+      <td class="${sigClass}">${SIGNAL_HE[c.signal] || c.signal}</td>
+      <td>${position}</td>
+      <td>${entry}</td>
+    </tr>`;
+  }).join('');
+
+  const btc = (d.coins || []).find(c => c.symbol === 'BTC/USDT');
+  if (btc && btc.price) {
+    btcPrices.push(btc.price);
+    if (btcPrices.length > 100) btcPrices.shift();
+    drawChart();
+  }
+}
+
+async function poll() {
+  try {
+    const [statusRes, coinsRes] = await Promise.all([
+      fetch('/status'),
+      fetch('/coins')
+    ]);
+    const status = await statusRes.json();
+    let coins = [];
+    if (coinsRes.ok) coins = await coinsRes.json();
+    updateUI({ ...status, coins, demo_pnl: status.demo_pnl || 0, open_count: (status.open_positions||[]).length });
+    document.getElementById('log').textContent = 'מתעדכן אוטומטית ✓ ' + new Date().toLocaleTimeString('he-IL');
+  } catch(e) {
+    document.getElementById('log').textContent = 'שגיאה — מנסה שוב...';
+  }
+}
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => document.getElementById('log').textContent = 'מחובר בזמן אמת ✓';
   ws.onclose = () => {
-    document.getElementById('log').textContent = 'מנותק — מתחבר מחדש...';
-    setTimeout(connect, 3000);
+    document.getElementById('log').textContent = 'משתמש בעדכון אוטומטי...';
   };
-
   ws.onmessage = (ev) => {
-    const d = JSON.parse(ev.data);
-
-    // top stats
-    document.getElementById('demoBalance').textContent =
-      '$' + d.demo_balance.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-
-    const pnl = d.demo_pnl;
-    const pnlEl = document.getElementById('demoPnl');
-    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    pnlEl.className = 'value ' + (pnl >= 0 ? 'pnl-pos' : 'pnl-neg');
-
-    document.getElementById('status').innerHTML = d.running
-      ? `פעיל<span class="status-dot dot-green"></span>`
-      : `עצור<span class="status-dot dot-red"></span>`;
-    document.getElementById('openCount').textContent = d.open_count;
-    document.getElementById('winrate').textContent = d.total_trades ? (d.win_rate * 100).toFixed(1) + '%' : '—';
-    document.getElementById('trades').textContent = d.total_trades;
-
-    // coins table
-    const tbody = document.getElementById('coinsTable');
-    tbody.innerHTML = (d.coins || []).map(c => {
-      const isActive = c.symbol === d.active_symbol;
-      const sigClass = c.signal || 'hold';
-      const price = c.price ? '$' + c.price.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
-      const entry = c.entry ? '$' + c.entry.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:4}) : '—';
-      const position = c.position ? '<span class="long-badge">LONG</span>' : '—';
-      return `<tr class="${isActive ? 'active-row' : ''}">
-        <td><b>${c.symbol.replace('/USDT','')}</b></td>
-        <td>${price}</td>
-        <td class="${sigClass}">${SIGNAL_HE[c.signal] || c.signal}</td>
-        <td>${position}</td>
-        <td>${entry}</td>
-      </tr>`;
-    }).join('');
-
-    // BTC chart
-    const btc = (d.coins || []).find(c => c.symbol === 'BTC/USDT');
-    if (btc && btc.price) {
-      btcPrices.push(btc.price);
-      if (btcPrices.length > 100) btcPrices.shift();
-      drawChart();
-    }
+    try { updateUI(JSON.parse(ev.data)); } catch(e) {}
   };
 }
 
@@ -208,6 +220,7 @@ async function fetchHistory() {
 
 async function action(a) {
   await fetch('/' + a, {method: 'POST'});
+  setTimeout(poll, 500);
 }
 
 async function resetDemo() {
@@ -218,8 +231,10 @@ async function resetDemo() {
 
 initChart();
 connect();
+poll();
 fetchHistory();
-setInterval(fetchHistory, 15000);
+setInterval(poll, 4000);
+setInterval(fetchHistory, 10000);
 </script>
 </body>
 </html>
