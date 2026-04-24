@@ -45,6 +45,28 @@ app = FastAPI(title="AI Trading Bot")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
+async def trading_loop():
+    """לולאת מסחר רקע — רצה תמיד, עצמאית מהדשבורד."""
+    symbol_index = 0
+    while True:
+        symbol = SYMBOLS[symbol_index % len(SYMBOLS)]
+        symbol_index += 1
+        try:
+            price, signal = await asyncio.get_event_loop().run_in_executor(
+                None, compute_signal_for, symbol
+            )
+            if bot_state["mode"] == "demo":
+                demo_tick(symbol, price, signal)
+        except Exception as e:
+            log.warning(f"loop error {symbol}: {e}")
+        await asyncio.sleep(4)
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(trading_loop())
+
+
 def load_history() -> list[dict]:
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE) as f:
