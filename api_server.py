@@ -1,6 +1,7 @@
 """
 ICT Trading Bot — Full Implementation
 Strategy: HTF Bias → Liquidity Sweep → Structure Shift → FVG Entry → Next Liquidity TP
+Timeframes: 30D · 7D · 1D · 4H · 1H · 30M · 15M · 5M
 """
 import asyncio
 import json
@@ -12,7 +13,7 @@ from datetime import datetime, timezone
 import httpx
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -22,6 +23,14 @@ log = logging.getLogger("ict")
 HISTORY_FILE = 'trade_history.json'
 DEMO_BALANCE = 1_000.0
 TRADE_SIZE_USD = 100.0  # $100 קבוע לכל עסקה
+
+# ─── CANDLE INTERVAL CONSTANTS (milliseconds) ────────────────────────────────
+MS_5M  =  5 * 60 * 1_000
+MS_15M = 15 * 60 * 1_000
+MS_30M = 30 * 60 * 1_000
+MS_1H  = 60 * 60 * 1_000
+MS_4H  =  4 * 60 * 60 * 1_000
+MS_1D  = 24 * 60 * 60 * 1_000
 
 COINS = {
     'bitcoin':     'BTC',
@@ -42,6 +51,9 @@ coin_state: dict[str, dict] = {
         "last_price": 0.0, "last_signal": "hold",
         "fvg": None, "sweep": False, "bias": "range", "bos": False,
         "score": 0,
+        # Per-timeframe breakdown
+        "bias_30d": "range", "bias_7d": "range", "bias_1d": "range",
+        "bos_4h": False, "bos_1h": False,
     }
     for sym in SYMBOLS
 }
@@ -55,14 +67,39 @@ bot_state = {
 
 # ─── DATA LAYER ───────────────────────────────────────────────────────────────
 
-async def fetch_ohlc(coin_id: str, days: int) -> list[dict]:
-    """CoinGecko OHLC — returns list of {open,high,low,close} dicts."""
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc?vs_currency=usd&days={days}"
+async def fetch_market_chart(coin_id: str, days: int) -> list:
+    """
+    CoinGecko market_chart → [[ts_ms, price], ...].
+    Auto granularity (free tier):
+      days=1   → ~5-min intervals  (~288 pts) → use for 5M / 15M / 30M
+      days≤90  → hourly intervals             → use for 1H / 4H / 1D / 7D / 30D
+    """
+    url = (f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+           f"?vs_currency=usd&days={days}")
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(url)
-        raw = r.json()
-    # raw: [[ts, open, high, low, close], ...]
-    return [{"ts": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4]} for c in raw]
+        data = r.json()
+    return data.get('prices', [])
+
+
+def to_ohlc(prices: list, interval_ms: int) -> list[dict]:
+    """Resample price ticks [[ts_ms, price]] into OHLC candles."""
+    if not prices:
+        return []
+    candles: dict[int, dict] = {}
+    for ts, price in prices:
+        bucket = (int(ts) // interval_ms) * interval_ms
+        if bucket not in candles:
+            candles[bucket] = {
+                'ts': bucket, 'open': price,
+                'high': price, 'low': price, 'close': price,
+            }
+        else:
+            c = candles[bucket]
+            if price > c['high']: c['high'] = price
+            if price < c['low']:  c['low']  = price
+            c['close'] = price
+    return sorted(candles.values(), key=lambda x: x['ts'])
 
 
 async def fetch_price(coin_id: str) -> float:
@@ -73,7 +110,7 @@ async def fetch_price(coin_id: str) -> float:
 
 
 async def fetch_all_prices() -> dict[str, float]:
-    """Batch-fetch all 8 coin prices in a single CoinGecko call."""
+    """Single CoinGecko call → prices for all 8 coins."""
     ids = ','.join(COINS.keys())
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
     async with httpx.AsyncClient(timeout=15) as client:
@@ -89,7 +126,7 @@ async def fetch_all_prices() -> dict[str, float]:
 # ─── ICT ENGINES ──────────────────────────────────────────────────────────────
 
 def get_bias(candles: list[dict]) -> str:
-    """HTF Bias: bullish if HH+HL, bearish if LH+LL, else range."""
+    """Bullish if HH+HL, bearish if LH+LL, else range."""
     if len(candles) < 4:
         return "range"
     highs = [c['high'] for c in candles]
@@ -98,10 +135,8 @@ def get_bias(candles: list[dict]) -> str:
     hl = lows[-1]  > lows[-2]
     lh = highs[-1] < highs[-2]
     ll = lows[-1]  < lows[-2]
-    if hh and hl:
-        return "bullish"
-    if lh and ll:
-        return "bearish"
+    if hh and hl: return "bullish"
+    if lh and ll: return "bearish"
     return "range"
 
 
@@ -119,30 +154,27 @@ def swing_highs_lows(candles: list[dict], lookback: int = 3):
 
 
 def detect_bos(candles: list[dict], swing_highs, swing_lows, bias: str) -> bool:
-    """Break of Structure — close breaks last swing high (bullish) or low (bearish)."""
+    """Break of Structure: close > last swing high (bullish) or < last swing low (bearish)."""
     if not candles:
         return False
     close = candles[-1]['close']
     if bias == "bullish" and swing_highs:
-        last_high = swing_highs[-1][1]
-        return close > last_high
+        return close > swing_highs[-1][1]
     if bias == "bearish" and swing_lows:
-        last_low = swing_lows[-1][1]
-        return close < last_low
+        return close < swing_lows[-1][1]
     return False
 
 
 def detect_fvg(candles: list[dict]) -> dict | None:
-    """Latest Fair Value Gap (last 30 candles)."""
+    """Latest Fair Value Gap in candle list."""
     for i in range(len(candles) - 1, 2, -1):
-        c1 = candles[i - 2]
-        c3 = candles[i]
-        # Bullish FVG: gap up (c3.low > c1.high)
-        if c3['low'] > c1['high']:
-            return {"type": "bullish", "low": c1['high'], "high": c3['low'], "mid": (c1['high'] + c3['low']) / 2}
-        # Bearish FVG: gap down (c3.high < c1.low)
-        if c3['high'] < c1['low']:
-            return {"type": "bearish", "low": c3['high'], "high": c1['low'], "mid": (c3['high'] + c1['low']) / 2}
+        c1, c3 = candles[i - 2], candles[i]
+        if c3['low'] > c1['high']:      # bullish FVG
+            return {"type": "bullish", "low": c1['high'], "high": c3['low'],
+                    "mid": (c1['high'] + c3['low']) / 2}
+        if c3['high'] < c1['low']:      # bearish FVG
+            return {"type": "bearish", "low": c3['high'], "high": c1['low'],
+                    "mid": (c3['high'] + c1['low']) / 2}
     return None
 
 
@@ -156,55 +188,67 @@ def detect_equal_levels(values: list[float], tolerance: float = 0.002) -> list[f
 
 
 def detect_sweep(price: float, levels: list[float], tolerance: float = 0.003) -> tuple[bool, float]:
-    """Returns (swept, swept_level) if price came within tolerance of a level."""
     for lvl in levels:
         if abs(price - lvl) / max(lvl, 1) < tolerance or price > lvl:
             return True, lvl
     return False, 0.0
 
 
-def fake_breakout(candle: dict, level: float) -> bool:
-    return candle['high'] > level and candle['close'] < level
+# ─── MULTI-TF SIGNAL ENGINE ───────────────────────────────────────────────────
 
-
-# ─── SIGNAL ENGINE ────────────────────────────────────────────────────────────
-
-def generate_signal(bias: str, sweep: bool, fvg: dict | None,
-                    bos: bool, price: float) -> tuple[str, int]:
+def generate_signal_mtf(
+    bias_30d: str, bias_7d: str, bias_1d: str,
+    bos_4h: bool, bos_1h: bool,
+    swept: bool, fvg: dict | None, price: float,
+) -> tuple[str, int]:
     """
-    ICT Score (max 7) — threshold 5 to enter:
-      +2  HTF daily bias bullish
-      +2  Liquidity sweep confirmed
-      +2  Break of Structure on MTF (4h)
-      +1  Price inside bullish FVG on LTF (30m)
-    No killzone restriction — trades 24/7.
+    ICT multi-timeframe score (max 10), threshold 6 → LONG entry.
+
+    Bias alignment (top-down):
+      +2  30D daily bias bullish   (dominant monthly trend)
+      +1  7D  bias bullish         (weekly alignment)
+      +1  1D  bias bullish         (daily alignment)
+
+    Structure:
+      +2  4H Break of Structure    (confirmed market shift)
+      +1  1H Break of Structure    (intraday confirmation)
+
+    Liquidity:
+      +2  Sweep of equal highs/lows on 4H or 1H
+
+    Entry precision:
+      +1  Price inside bullish FVG on 30M / 15M / 5M
+
+    Bearish bias at any level subtracts points → prevents longs in downtrends.
     """
     score = 0
 
-    if bias == "bullish":
-        score += 2
-    elif bias == "bearish":
-        score -= 2  # bearish bias → don't buy
+    # Bias
+    if bias_30d == "bullish":   score += 2
+    elif bias_30d == "bearish": score -= 2
+    if bias_7d  == "bullish":   score += 1
+    elif bias_7d  == "bearish": score -= 1
+    if bias_1d  == "bullish":   score += 1
+    elif bias_1d  == "bearish": score -= 1
 
-    if sweep:
-        score += 2
+    # Structure
+    if bos_4h: score += 2
+    if bos_1h: score += 1
 
-    if bos:
-        score += 2
+    # Liquidity sweep
+    if swept: score += 2
 
+    # FVG entry
     if fvg and fvg['type'] == "bullish" and fvg['low'] <= price <= fvg['high']:
-        score += 1  # price inside FVG
+        score += 1
 
-    if score >= 5:
-        return "buy", score
-
-    return "hold", score
+    return ("buy", score) if score >= 6 else ("hold", score)
 
 
 # ─── RISK MANAGEMENT ──────────────────────────────────────────────────────────
 
 def calc_sl_tp(price: float, sweep_level: float, next_liq: float, bias: str):
-    """SL below liquidity sweep, TP at next liquidity level."""
+    """SL below liquidity sweep, TP at next liquidity target."""
     if bias == "bullish":
         sl = sweep_level * 0.998 if sweep_level else price * 0.98
         tp = next_liq if next_liq > price else price * 1.04
@@ -217,33 +261,36 @@ def calc_sl_tp(price: float, sweep_level: float, next_liq: float, bias: str):
 # ─── DEMO EXECUTION ───────────────────────────────────────────────────────────
 
 def demo_tick(sym: str, price: float, signal: str, sl: float, tp: float, score: int,
-              bias: str, sweep: bool, fvg, bos: bool):
+              bias: str, sweep: bool, fvg, bos: bool,
+              bias_30d: str, bias_7d: str, bias_1d: str,
+              bos_4h: bool, bos_1h: bool):
     cs = coin_state[sym]
-    cs.update({"last_price": price, "last_signal": signal, "score": score,
-                "bias": bias, "sweep": sweep, "fvg": fvg, "bos": bos})
+    cs.update({
+        "last_price": price, "last_signal": signal, "score": score,
+        "bias": bias, "sweep": sweep, "fvg": fvg, "bos": bos,
+        "bias_30d": bias_30d, "bias_7d": bias_7d, "bias_1d": bias_1d,
+        "bos_4h": bos_4h, "bos_1h": bos_1h,
+    })
 
     if not bot_state["running"]:
         return
 
-    # Check exit first
+    # Exit check
     if cs["position"] == "long":
-        entry = cs["entry"]
         if price <= cs["sl"]:
             _close(sym, price, "stop-loss")
         elif price >= cs["tp"]:
             _close(sym, price, "take-profit")
-        elif signal == "hold" and price < entry * 0.985:
+        elif signal == "hold" and price < cs["entry"] * 0.985:
             _close(sym, price, "signal-exit")
         return
 
     # Entry
     if signal == "buy" and cs["position"] is None and bot_state["demo_balance"] >= TRADE_SIZE_USD:
-        amount_usd = TRADE_SIZE_USD
-        amount = amount_usd / price
-        cs.update({"amount": amount, "entry": price, "position": "long",
-                   "sl": sl, "tp": tp})
-        bot_state["demo_balance"] -= amount_usd
-        log.info(f"[BUY] {sym} @ ${price:.4f} SL=${sl:.4f} TP=${tp:.4f} score={score}")
+        amount = TRADE_SIZE_USD / price
+        cs.update({"amount": amount, "entry": price, "position": "long", "sl": sl, "tp": tp})
+        bot_state["demo_balance"] -= TRADE_SIZE_USD
+        log.info(f"[BUY] {sym} @ ${price:.4f}  SL=${sl:.4f}  TP=${tp:.4f}  score={score}/10")
 
 
 def _close(sym: str, price: float, reason: str):
@@ -256,83 +303,125 @@ def _close(sym: str, price: float, reason: str):
 
     h = load_history()
     h.append({
-        "time": datetime.utcnow().isoformat(),
-        "symbol": sym, "reason": reason,
-        "entry": round(cs["entry"], 6), "exit": round(price, 6),
-        "sl": round(cs["sl"], 6), "tp": round(cs["tp"], 6),
-        "cost_usd": round(cost_usd, 2),
-        "profit_usd": round(profit_usd, 2),
-        "profit": round(profit_pct, 6),
-        "balance": round(bot_state["demo_balance"], 2),
-        "score": cs.get("score", 0),
+        "time":       datetime.utcnow().isoformat(),
+        "symbol":     sym,
+        "reason":     reason,
+        "entry":      round(cs["entry"],  6),
+        "exit":       round(price,        6),
+        "sl":         round(cs["sl"],     6),
+        "tp":         round(cs["tp"],     6),
+        "cost_usd":   round(cost_usd,     2),
+        "profit_usd": round(profit_usd,   2),
+        "profit":     round(profit_pct,   6),
+        "balance":    round(bot_state["demo_balance"], 2),
+        "score":      cs.get("score", 0),
     })
     save_history(h)
     cs.update({"position": None, "entry": 0.0, "amount": 0.0, "sl": 0.0, "tp": 0.0})
     emoji = "✅" if profit_pct > 0 else "❌"
-    log.info(f"[{emoji}] {sym} {reason} {profit_pct:.2%} → ${bot_state['demo_balance']:.2f}")
+    log.info(f"[{emoji}] {sym} {reason}  {profit_pct:+.2%}  balance=${bot_state['demo_balance']:.2f}")
 
 
 # ─── MAIN TRADING LOOP ────────────────────────────────────────────────────────
 
 async def analyze_coin(sym: str):
     """
-    3-level ICT timeframe analysis:
-      HTF  90 days  → daily candles    → Bias direction
-      MTF   7 days  → 4h candles       → Structure, BOS, Liquidity Sweep
-      LTF   1 day   → 30min candles    → FVG entry precision
+    8-timeframe ICT analysis per coin:
+      chart_30d (hourly ticks) → daily OHLC  → 30D / 7D / 1D bias
+      chart_7d  (hourly ticks) → 4H / 1H     → BOS + liquidity sweep
+      chart_1d  (5-min  ticks) → 30M / 15M / 5M → FVG entry
     """
     coin_id = COIN_IDS[sym]
     try:
-        # Fetch all 3 timeframes concurrently
-        htf_candles, mtf_candles, ltf_candles = await asyncio.gather(
-            fetch_ohlc(coin_id, 90),   # daily candles → HTF bias
-            fetch_ohlc(coin_id, 7),    # 4h candles    → MTF structure
-            fetch_ohlc(coin_id, 1),    # 30m candles   → LTF FVG entry
+        # 3 concurrent API calls cover all 8 timeframes
+        chart_30d, chart_7d, chart_1d = await asyncio.gather(
+            fetch_market_chart(coin_id, 30),   # hourly → 1D/7D/30D
+            fetch_market_chart(coin_id, 7),    # hourly → 4H/1H
+            fetch_market_chart(coin_id, 1),    # 5-min  → 30M/15M/5M
         )
-        if not htf_candles or not mtf_candles or not ltf_candles:
+
+        # ── Resample to all 8 timeframes ────────────────────────────────────
+        tf_1d  = to_ohlc(chart_30d, MS_1D)   # daily  (30 candles)
+        tf_4h  = to_ohlc(chart_7d,  MS_4H)   # 4-hour (42 candles)
+        tf_1h  = to_ohlc(chart_7d,  MS_1H)   # 1-hour (168 candles)
+        tf_30m = to_ohlc(chart_1d,  MS_30M)  # 30-min (48 candles)
+        tf_15m = to_ohlc(chart_1d,  MS_15M)  # 15-min (96 candles)
+        tf_5m  = to_ohlc(chart_1d,  MS_5M)   # 5-min  (288 candles)
+
+        if not tf_1d or not tf_4h or not tf_1h:
             return
 
-        # Use cached price (updated every 30s by price_loop)
+        # Cached price (updated every 30s by price_loop)
         price = coin_state[sym]["last_price"]
         if price == 0.0:
             price = await fetch_price(coin_id)
             coin_state[sym]["last_price"] = price
 
-        # 1. HTF Daily Bias — last 30 daily candles
-        bias = get_bias(htf_candles[-30:])
+        # ── BIAS: top-down across 30D / 7D / 1D ─────────────────────────────
+        bias_30d = get_bias(tf_1d)                                         # all 30 daily candles
+        bias_7d  = get_bias(tf_1d[-7:]  if len(tf_1d)  >= 7  else tf_1d)  # last 7 daily
+        bias_1d  = get_bias(tf_4h[-6:]  if len(tf_4h)  >= 6  else tf_4h)  # last 6×4H ≈ 1 day
 
-        # 2. MTF (4h) Swing structure for BOS and liquidity levels
-        swing_h, swing_l = swing_highs_lows(mtf_candles)
+        # Majority vote for dominant bias
+        votes = [bias_30d, bias_7d, bias_1d]
+        bias  = max(set(votes), key=votes.count)
 
-        # 3. Break of Structure on MTF (4h)
-        bos = detect_bos(mtf_candles, swing_h, swing_l, bias)
+        # ── STRUCTURE: BOS on 4H and 1H ──────────────────────────────────────
+        sh_4h, sl_4h = swing_highs_lows(tf_4h)
+        sh_1h, sl_1h = swing_highs_lows(tf_1h)
+        bos_4h = detect_bos(tf_4h, sh_4h, sl_4h, bias)
+        bos_1h = detect_bos(tf_1h, sh_1h, sl_1h, bias)
 
-        # 4. Liquidity levels from MTF (equal highs/lows on 4h)
-        highs_vals = [c['high'] for c in mtf_candles[-40:]]
-        lows_vals  = [c['low']  for c in mtf_candles[-40:]]
-        eq_highs = detect_equal_levels(highs_vals)
-        eq_lows  = detect_equal_levels(lows_vals)
-        liq_levels = eq_highs if bias == "bullish" else eq_lows
+        # ── LIQUIDITY: equal highs/lows + sweep on 4H (primary) + 1H ────────
+        highs_4h = [c['high'] for c in tf_4h[-40:]]
+        lows_4h  = [c['low']  for c in tf_4h[-40:]]
+        eq_highs_4h = detect_equal_levels(highs_4h)
+        eq_lows_4h  = detect_equal_levels(lows_4h)
 
-        # 5. Liquidity sweep on MTF
-        swept, sweep_level = detect_sweep(price, liq_levels)
+        highs_1h = [c['high'] for c in tf_1h[-30:]]
+        lows_1h  = [c['low']  for c in tf_1h[-30:]]
+        eq_highs_1h = detect_equal_levels(highs_1h)
+        eq_lows_1h  = detect_equal_levels(lows_1h)
 
-        # 6. FVG on LTF (30m) for precise entry
-        fvg = detect_fvg(ltf_candles[-30:])
+        liq_4h = eq_highs_4h if bias == "bullish" else eq_lows_4h
+        liq_1h = eq_highs_1h if bias == "bullish" else eq_lows_1h
 
-        # 7. Signal — no killzone restriction, trades 24/7
-        signal, score = generate_signal(bias, swept, fvg, bos, price)
+        swept_4h, sweep_lvl_4h = detect_sweep(price, liq_4h)
+        swept_1h, sweep_lvl_1h = detect_sweep(price, liq_1h)
+        swept       = swept_4h or swept_1h
+        sweep_level = sweep_lvl_4h if swept_4h else sweep_lvl_1h
 
-        # 8. SL / TP
-        next_liq = max(eq_highs) if eq_highs else price * 1.04
+        # ── FVG: 30M → 15M → 5M (best available precision) ──────────────────
+        fvg = (
+            detect_fvg(tf_30m[-30:]) or
+            detect_fvg(tf_15m[-30:]) or
+            detect_fvg(tf_5m[-30:])
+        )
+
+        # ── SIGNAL ───────────────────────────────────────────────────────────
+        signal, score = generate_signal_mtf(
+            bias_30d, bias_7d, bias_1d,
+            bos_4h, bos_1h,
+            swept, fvg, price,
+        )
+
+        # ── SL / TP ──────────────────────────────────────────────────────────
+        all_eq_highs = eq_highs_4h + eq_highs_1h
+        next_liq = max(all_eq_highs) if all_eq_highs else price * 1.04
         sl, tp = calc_sl_tp(price, sweep_level, next_liq, bias)
 
-        # 9. Execute
-        demo_tick(sym, price, signal, sl, tp, score, bias, swept, fvg, bos)
+        # ── EXECUTE ──────────────────────────────────────────────────────────
+        demo_tick(
+            sym, price, signal, sl, tp, score,
+            bias, swept, fvg, bos_4h or bos_1h,
+            bias_30d, bias_7d, bias_1d, bos_4h, bos_1h,
+        )
 
         log.info(
-            f"{sym} ${price:.4f} | HTF-bias={bias} | MTF-bos={bos} sweep={swept} "
-            f"| LTF-fvg={'✓' if fvg else '✗'} | score={score} → {signal}"
+            f"{sym} ${price:,.2f} | "
+            f"30D={bias_30d} 7D={bias_7d} 1D={bias_1d} | "
+            f"4H-BOS={bos_4h} 1H-BOS={bos_1h} sweep={swept} | "
+            f"FVG={'✓' if fvg else '✗'} | score={score}/10 → {signal}"
         )
 
     except Exception as e:
@@ -340,37 +429,37 @@ async def analyze_coin(sym: str):
 
 
 async def price_loop():
-    """Fast loop: batch-fetch all prices every 30 seconds so dashboard always shows values."""
+    """Fast loop — batch price update for all 8 coins every 30 seconds."""
     log.info("Price loop started")
     while True:
         try:
             prices = await fetch_all_prices()
-            for sym, price in prices.items():
-                if price > 0:
-                    coin_state[sym]["last_price"] = price
-            log.info(f"Prices updated: { {s: f'${p:.2f}' for s, p in prices.items()} }")
+            for sym, p in prices.items():
+                if p > 0:
+                    coin_state[sym]["last_price"] = p
+            log.info(f"Prices: { {s: f'${p:,.2f}' for s, p in prices.items()} }")
         except Exception as e:
             log.warning(f"price_loop error: {e}")
         await asyncio.sleep(30)
 
 
 async def trading_loop():
-    """ICT analysis loop — runs full analysis per coin with spacing to avoid rate limits."""
-    log.info("ICT Trading loop started")
-    # Initial price fetch so dashboard shows values immediately
+    """ICT analysis loop — 8 timeframes per coin, 15s spacing to respect rate limits."""
+    log.info("ICT Trading loop started  [30D · 7D · 1D · 4H · 1H · 30M · 15M · 5M]")
+    # Prices before first analysis cycle
     try:
         prices = await fetch_all_prices()
-        for sym, price in prices.items():
-            if price > 0:
-                coin_state[sym]["last_price"] = price
+        for sym, p in prices.items():
+            if p > 0:
+                coin_state[sym]["last_price"] = p
     except Exception as e:
         log.warning(f"Initial price fetch failed: {e}")
 
     while True:
         for sym in SYMBOLS:
             await analyze_coin(sym)
-            await asyncio.sleep(12)  # 12s between coins → 96s per full cycle
-        await asyncio.sleep(30)  # rest before next cycle
+            await asyncio.sleep(15)   # 15s × 8 coins = 2 min per full cycle
+        await asyncio.sleep(30)       # rest between cycles
 
 
 # ─── APP ──────────────────────────────────────────────────────────────────────
@@ -388,8 +477,8 @@ def save_history(h: list):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    t1 = asyncio.create_task(price_loop())    # fast: prices every 30s
-    t2 = asyncio.create_task(trading_loop())  # slow: ICT analysis per coin
+    t1 = asyncio.create_task(price_loop())    # fast  — prices every 30s
+    t2 = asyncio.create_task(trading_loop())  # slow  — ICT analysis per coin
     yield
     t1.cancel()
     t2.cancel()
@@ -442,21 +531,21 @@ def positions_endpoint():
             price = cs["last_price"]
             entry = cs["entry"]
             amount = cs["amount"]
-            cost_usd   = amount * entry
+            cost_usd    = amount * entry
             current_val = amount * price
-            pnl_usd    = current_val - cost_usd
-            pnl_pct    = (price - entry) / entry if entry else 0
+            pnl_usd     = current_val - cost_usd
+            pnl_pct     = (price - entry) / entry if entry else 0
             result.append({
-                "symbol": sym,
-                "entry": round(entry, 4),
-                "current_price": round(price, 4),
-                "cost_usd": round(cost_usd, 2),
+                "symbol":        sym,
+                "entry":         round(entry,       4),
+                "current_price": round(price,       4),
+                "cost_usd":      round(cost_usd,    2),
                 "current_value": round(current_val, 2),
-                "pnl_usd": round(pnl_usd, 2),
-                "pnl_pct": round(pnl_pct * 100, 2),
-                "sl": round(cs["sl"], 4),
-                "tp": round(cs["tp"], 4),
-                "score": cs["score"],
+                "pnl_usd":       round(pnl_usd,     2),
+                "pnl_pct":       round(pnl_pct * 100, 2),
+                "sl":            round(cs["sl"],    4),
+                "tp":            round(cs["tp"],    4),
+                "score":         cs["score"],
             })
     return result
 
@@ -465,18 +554,23 @@ def positions_endpoint():
 def coins_endpoint():
     return [
         {
-            "symbol": s,
-            "price": coin_state[s]["last_price"],
-            "signal": coin_state[s]["last_signal"],
+            "symbol":   s,
+            "price":    coin_state[s]["last_price"],
+            "signal":   coin_state[s]["last_signal"],
             "position": coin_state[s]["position"],
-            "entry": coin_state[s]["entry"],
-            "sl": coin_state[s]["sl"],
-            "tp": coin_state[s]["tp"],
-            "bias": coin_state[s]["bias"],
-            "sweep": coin_state[s]["sweep"],
-            "bos": coin_state[s]["bos"],
-            "score": coin_state[s]["score"],
-            "fvg": coin_state[s]["fvg"] is not None,
+            "entry":    coin_state[s]["entry"],
+            "sl":       coin_state[s]["sl"],
+            "tp":       coin_state[s]["tp"],
+            "bias":     coin_state[s]["bias"],
+            "bias_30d": coin_state[s]["bias_30d"],
+            "bias_7d":  coin_state[s]["bias_7d"],
+            "bias_1d":  coin_state[s]["bias_1d"],
+            "sweep":    coin_state[s]["sweep"],
+            "bos":      coin_state[s]["bos"],
+            "bos_4h":   coin_state[s]["bos_4h"],
+            "bos_1h":   coin_state[s]["bos_1h"],
+            "score":    coin_state[s]["score"],
+            "fvg":      coin_state[s]["fvg"] is not None,
         }
         for s in SYMBOLS
     ]

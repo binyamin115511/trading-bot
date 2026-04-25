@@ -50,7 +50,7 @@
 </head>
 <body>
 <h1>🧠 ICT Trading Bot</h1>
-<div class="demo-banner">🎮 מצב דמו — ללא כסף אמיתי | אסטרטגיה: ICT (FVG + Liquidity Sweep + BOS)</div>
+<div class="demo-banner">🎮 מצב דמו — ללא כסף אמיתי | ICT: 30D · 7D · 1D · 4H · 1H · 30M · 15M · 5M | סף כניסה: 6/10</div>
 
 <div class="top-grid">
   <div class="card demo-card">
@@ -86,13 +86,14 @@
 </div>
 
 <div class="section">
-  <h3>📊 ניתוח ICT לכל מטבע</h3>
+  <h3>📊 ניתוח ICT לכל מטבע — 8 טיימפריימים</h3>
   <table>
     <thead>
       <tr>
-        <th>מטבע</th><th>מחיר</th><th>Bias</th>
-        <th>Sweep</th><th>BOS</th><th>FVG</th>
-        <th>סקור</th><th>סיגנל</th><th>פוזיציה</th>
+        <th>מטבע</th><th>מחיר</th>
+        <th>30D</th><th>7D</th><th>1D</th>
+        <th>Sweep</th><th>BOS 4H</th><th>BOS 1H</th><th>FVG</th>
+        <th>סקור/10</th><th>סיגנל</th><th>פוזיציה</th>
       </tr>
     </thead>
     <tbody id="coinsTable"></tbody>
@@ -159,14 +160,20 @@ function badge(val, trueClass, falseClass, trueText, falseText) {
 }
 
 function scoreBar(score) {
-  const pct = Math.min(100, Math.max(0, (score / 7) * 100));
-  const color = score >= 5 ? '#3fb950' : score >= 3 ? '#d29922' : '#f85149';
+  const pct = Math.min(100, Math.max(0, (score / 10) * 100));
+  const color = score >= 6 ? '#3fb950' : score >= 4 ? '#d29922' : '#f85149';
   return `<span style="display:inline-flex;align-items:center;gap:4px">
     <span style="width:40px;height:5px;background:#21262d;border-radius:3px;display:inline-block">
       <span style="width:${pct}%;height:100%;background:${color};border-radius:3px;display:block"></span>
     </span>
     <b style="color:${color}">${score}</b>
   </span>`;
+}
+
+function biasBadge(b) {
+  if (b === 'bullish') return `<span style="color:#3fb950;font-size:0.72rem">▲</span>`;
+  if (b === 'bearish') return `<span style="color:#f85149;font-size:0.72rem">▼</span>`;
+  return `<span style="color:#8b949e;font-size:0.72rem">—</span>`;
 }
 
 function updateUI(status, coins) {
@@ -185,20 +192,21 @@ function updateUI(status, coins) {
 
   document.getElementById('coinsTable').innerHTML = coins.map(c => {
     const price = c.price ? '$'+c.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4}) : '—';
-    const biasClass = c.bias==='bullish'?'bull':c.bias==='bearish'?'bear':'range';
-    const biasHe = c.bias==='bullish'?'שורי 📈':c.bias==='bearish'?'דובי 📉':'ניטרל';
     const sigClass = c.signal==='buy'?'buy':c.signal==='sell'?'sell':'hold';
-    const sigHe = c.signal==='buy'?'קנה':c.signal==='sell'?'מכור':'המתן';
+    const sigHe = c.signal==='buy'?'🟢 קנה':c.signal==='sell'?'🔴 מכור':'⏸ המתן';
     const pos = c.position ? `<span class="badge badge-green">LONG</span>` : '—';
     return `<tr>
       <td><b>${c.symbol}</b></td>
       <td>${price}</td>
-      <td class="${biasClass}">${biasHe}</td>
-      <td>${badge(c.sweep,'badge-green','badge-gray','✓ Sweep','—')}</td>
-      <td>${badge(c.bos,'badge-green','badge-gray','✓ BOS','—')}</td>
-      <td>${badge(c.fvg,'badge-green','badge-gray','✓ FVG','—')}</td>
+      <td>${biasBadge(c.bias_30d||c.bias)}</td>
+      <td>${biasBadge(c.bias_7d||c.bias)}</td>
+      <td>${biasBadge(c.bias_1d||c.bias)}</td>
+      <td>${badge(c.sweep,'badge-green','badge-gray','✓','—')}</td>
+      <td>${badge(c.bos_4h,'badge-green','badge-gray','✓','—')}</td>
+      <td>${badge(c.bos_1h,'badge-green','badge-gray','✓','—')}</td>
+      <td>${badge(c.fvg,'badge-green','badge-gray','✓','—')}</td>
       <td>${scoreBar(c.score||0)}</td>
-      <td class="${sigClass}">${sigHe}</td>
+      <td class="${sigClass}"><b>${sigHe}</b></td>
       <td>${pos}</td>
     </tr>`;
   }).join('');
