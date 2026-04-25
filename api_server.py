@@ -72,6 +72,20 @@ async def fetch_price(coin_id: str) -> float:
         return r.json()[coin_id]['usd']
 
 
+async def fetch_all_prices() -> dict[str, float]:
+    """Batch-fetch all 8 coin prices in a single CoinGecko call."""
+    ids = ','.join(COINS.keys())
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(url)
+        data = r.json()
+    result = {}
+    for coin_id, sym in COINS.items():
+        if coin_id in data and 'usd' in data[coin_id]:
+            result[sym] = data[coin_id]['usd']
+    return result
+
+
 # ─── ICT ENGINES ──────────────────────────────────────────────────────────────
 
 def get_bias(candles: list[dict]) -> str:
@@ -265,13 +279,20 @@ async def analyze_coin(sym: str):
     coin_id = COIN_IDS[sym]
     try:
         # Fetch HTF (4h candles via 7 days) and LTF (30m candles via 1 day)
-        htf_candles, ltf_candles, price = await asyncio.gather(
+        # Price already updated by price_loop — use cached value
+        htf_candles, ltf_candles = await asyncio.gather(
             fetch_ohlc(coin_id, 7),
             fetch_ohlc(coin_id, 1),
-            fetch_price(coin_id),
         )
         if not htf_candles or not ltf_candles:
             return
+
+        # Use cached price (updated every 30s by price_loop)
+        price = coin_state[sym]["last_price"]
+        if price == 0.0:
+            # Fallback: fetch individually if price_loop hasn't run yet
+            price = await fetch_price(coin_id)
+            coin_state[sym]["last_price"] = price
 
         # 1. HTF Bias
         bias = get_bias(htf_candles[-20:])
@@ -314,13 +335,38 @@ async def analyze_coin(sym: str):
         log.warning(f"analyze {sym}: {e}")
 
 
+async def price_loop():
+    """Fast loop: batch-fetch all prices every 30 seconds so dashboard always shows values."""
+    log.info("Price loop started")
+    while True:
+        try:
+            prices = await fetch_all_prices()
+            for sym, price in prices.items():
+                if price > 0:
+                    coin_state[sym]["last_price"] = price
+            log.info(f"Prices updated: { {s: f'${p:.2f}' for s, p in prices.items()} }")
+        except Exception as e:
+            log.warning(f"price_loop error: {e}")
+        await asyncio.sleep(30)
+
+
 async def trading_loop():
+    """ICT analysis loop — runs full analysis per coin with spacing to avoid rate limits."""
     log.info("ICT Trading loop started")
+    # Initial price fetch so dashboard shows values immediately
+    try:
+        prices = await fetch_all_prices()
+        for sym, price in prices.items():
+            if price > 0:
+                coin_state[sym]["last_price"] = price
+    except Exception as e:
+        log.warning(f"Initial price fetch failed: {e}")
+
     while True:
         for sym in SYMBOLS:
             await analyze_coin(sym)
-            await asyncio.sleep(8)  # space out API calls
-        await asyncio.sleep(60)  # full cycle every ~2 min
+            await asyncio.sleep(12)  # 12s between coins → 96s per full cycle
+        await asyncio.sleep(30)  # rest before next cycle
 
 
 # ─── APP ──────────────────────────────────────────────────────────────────────
@@ -338,9 +384,11 @@ def save_history(h: list):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(trading_loop())
+    t1 = asyncio.create_task(price_loop())    # fast: prices every 30s
+    t2 = asyncio.create_task(trading_loop())  # slow: ICT analysis per coin
     yield
-    task.cancel()
+    t1.cancel()
+    t2.cancel()
 
 
 app = FastAPI(title="ICT Trading Bot", lifespan=lifespan)
