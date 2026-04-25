@@ -21,7 +21,7 @@ log = logging.getLogger("ict")
 
 HISTORY_FILE = 'trade_history.json'
 DEMO_BALANCE = 1_000.0
-RISK_PER_TRADE = 0.01   # 1% per trade
+TRADE_SIZE_USD = 100.0  # $100 קבוע לכל עסקה
 
 COINS = {
     'bitcoin':     'BTC',
@@ -224,8 +224,8 @@ def demo_tick(sym: str, price: float, signal: str, sl: float, tp: float, score: 
         return
 
     # Entry
-    if signal == "buy" and cs["position"] is None and bot_state["demo_balance"] > 10:
-        amount_usd = bot_state["demo_balance"] * RISK_PER_TRADE
+    if signal == "buy" and cs["position"] is None and bot_state["demo_balance"] >= TRADE_SIZE_USD:
+        amount_usd = TRADE_SIZE_USD
         amount = amount_usd / price
         cs.update({"amount": amount, "entry": price, "position": "long",
                    "sl": sl, "tp": tp})
