@@ -236,7 +236,9 @@ def demo_tick(sym: str, price: float, signal: str, sl: float, tp: float, score: 
 def _close(sym: str, price: float, reason: str):
     cs = coin_state[sym]
     profit_pct = (price - cs["entry"]) / cs["entry"]
-    proceeds = cs["amount"] * price
+    cost_usd   = cs["amount"] * cs["entry"]
+    profit_usd = cs["amount"] * (price - cs["entry"])
+    proceeds   = cs["amount"] * price
     bot_state["demo_balance"] += proceeds
 
     h = load_history()
@@ -245,6 +247,8 @@ def _close(sym: str, price: float, reason: str):
         "symbol": sym, "reason": reason,
         "entry": round(cs["entry"], 6), "exit": round(price, 6),
         "sl": round(cs["sl"], 6), "tp": round(cs["tp"], 6),
+        "cost_usd": round(cost_usd, 2),
+        "profit_usd": round(profit_usd, 2),
         "profit": round(profit_pct, 6),
         "balance": round(bot_state["demo_balance"], 2),
         "score": cs.get("score", 0),
@@ -375,6 +379,34 @@ def reset_demo():
         cs.update({"position": None, "entry": 0.0, "amount": 0.0, "sl": 0.0, "tp": 0.0})
     save_history([])
     return {"status": "reset"}
+
+
+@app.get("/positions")
+def positions_endpoint():
+    """פוזיציות פתוחות עם P&L חי בדולרים."""
+    result = []
+    for sym, cs in coin_state.items():
+        if cs["position"] == "long":
+            price = cs["last_price"]
+            entry = cs["entry"]
+            amount = cs["amount"]
+            cost_usd   = amount * entry
+            current_val = amount * price
+            pnl_usd    = current_val - cost_usd
+            pnl_pct    = (price - entry) / entry if entry else 0
+            result.append({
+                "symbol": sym,
+                "entry": round(entry, 4),
+                "current_price": round(price, 4),
+                "cost_usd": round(cost_usd, 2),
+                "current_value": round(current_val, 2),
+                "pnl_usd": round(pnl_usd, 2),
+                "pnl_pct": round(pnl_pct * 100, 2),
+                "sl": round(cs["sl"], 4),
+                "tp": round(cs["tp"], 4),
+                "score": cs["score"],
+            })
+    return result
 
 
 @app.get("/coins")

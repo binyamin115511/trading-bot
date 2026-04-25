@@ -100,15 +100,25 @@
 </div>
 
 <div class="section">
+  <h3>💼 פוזיציות פתוחות — רווח/הפסד חי בדולרים</h3>
+  <table>
+    <thead>
+      <tr><th>מטבע</th><th>כניסה $</th><th>מחיר כעת $</th><th>שווי $</th><th>רווח/הפסד $</th><th>%</th><th>SL $</th><th>TP $</th><th>סקור</th></tr>
+    </thead>
+    <tbody id="positionsTable"><tr><td colspan="9" style="color:#8b949e;text-align:center">אין פוזיציות פתוחות</td></tr></tbody>
+  </table>
+</div>
+
+<div class="section">
   <h3>📈 גרף BTC</h3>
   <canvas id="chart"></canvas>
 </div>
 
 <div class="section">
-  <h3>📋 היסטוריית עסקאות ICT</h3>
+  <h3>📋 עסקאות סגורות — רווח/הפסד בדולרים</h3>
   <table>
     <thead>
-      <tr><th>שעה</th><th>מטבע</th><th>סיבה</th><th>כניסה</th><th>יציאה</th><th>סקור</th><th>רווח/הפסד</th><th>יתרה</th></tr>
+      <tr><th>שעה</th><th>מטבע</th><th>סיבה</th><th>כניסה $</th><th>יציאה $</th><th>רווח/הפסד $</th><th>%</th><th>יתרה $</th></tr>
     </thead>
     <tbody id="historyTable"></tbody>
   </table>
@@ -207,20 +217,56 @@ async function poll() {
   } catch(e) { document.getElementById('log').textContent = 'שגיאה — מנסה שוב...'; }
 }
 
+async function fetchPositions() {
+  try {
+    const r = await fetch('/positions');
+    const data = await r.json();
+    const tbody = document.getElementById('positionsTable');
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="color:#8b949e;text-align:center">אין פוזיציות פתוחות</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(p => {
+      const pnlClass = p.pnl_usd >= 0 ? 'profit-pos' : 'profit-neg';
+      const pnlSign  = p.pnl_usd >= 0 ? '+' : '';
+      return `<tr>
+        <td><b>${p.symbol}</b></td>
+        <td>$${p.entry.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+        <td>$${p.current_price.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+        <td>$${p.current_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td class="${pnlClass}"><b>${pnlSign}$${Math.abs(p.pnl_usd).toFixed(2)}</b></td>
+        <td class="${pnlClass}">${pnlSign}${p.pnl_pct.toFixed(2)}%</td>
+        <td style="color:#f85149">$${p.sl.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+        <td style="color:#3fb950">$${p.tp.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+        <td><b>${p.score}</b></td>
+      </tr>`;
+    }).join('');
+  } catch(e) {}
+}
+
 async function fetchHistory() {
   const r = await fetch('/history');
   const data = await r.json();
-  document.getElementById('historyTable').innerHTML = data.slice(-20).reverse().map(t => `
-    <tr>
+  const tbody = document.getElementById('historyTable');
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:#8b949e;text-align:center">עדיין אין עסקאות סגורות</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.slice(-30).reverse().map(t => {
+    const pnlUsd = t.profit_usd ?? (t.profit * (t.cost_usd || 10));
+    const pnlClass = pnlUsd >= 0 ? 'profit-pos' : 'profit-neg';
+    const pnlSign  = pnlUsd >= 0 ? '+' : '';
+    return `<tr>
       <td>${new Date(t.time).toLocaleTimeString('he-IL')}</td>
-      <td><b>${(t.symbol||'').replace('/USDT','')}</b></td>
+      <td><b>${(t.symbol||'')}</b></td>
       <td>${REASON_HE[t.reason]||t.reason}</td>
-      <td>$${(t.entry||0).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
-      <td>$${(t.exit||0).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
-      <td><b>${t.score||'—'}</b></td>
-      <td class="${t.profit>=0?'profit-pos':'profit-neg'}">${t.profit>=0?'+':''}${(t.profit*100).toFixed(2)}%</td>
-      <td>$${(t.balance||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
-    </tr>`).join('');
+      <td>$${(t.entry||0).toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+      <td>$${(t.exit||0).toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+      <td class="${pnlClass}"><b>${pnlSign}$${Math.abs(pnlUsd).toFixed(2)}</b></td>
+      <td class="${pnlClass}">${pnlSign}${(t.profit*100).toFixed(2)}%</td>
+      <td>$${(t.balance||0).toFixed(2)}</td>
+    </tr>`;
+  }).join('');
 }
 
 async function action(a) { await fetch('/'+a,{method:'POST'}); setTimeout(poll,500); }
@@ -229,8 +275,9 @@ async function resetDemo() {
   await fetch('/reset-demo',{method:'POST'}); poll(); fetchHistory();
 }
 
-initChart(); poll(); fetchHistory();
+initChart(); poll(); fetchPositions(); fetchHistory();
 setInterval(poll, 5000);
+setInterval(fetchPositions, 6000);
 setInterval(fetchHistory, 15000);
 </script>
 </body>
