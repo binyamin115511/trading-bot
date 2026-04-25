@@ -163,12 +163,6 @@ def detect_sweep(price: float, levels: list[float], tolerance: float = 0.003) ->
     return False, 0.0
 
 
-def is_killzone() -> bool:
-    """London: 07-10 UTC | New York: 13-16 UTC."""
-    hour = datetime.now(timezone.utc).hour
-    return 7 <= hour <= 10 or 13 <= hour <= 16
-
-
 def fake_breakout(candle: dict, level: float) -> bool:
     return candle['high'] > level and candle['close'] < level
 
@@ -176,7 +170,15 @@ def fake_breakout(candle: dict, level: float) -> bool:
 # ─── SIGNAL ENGINE ────────────────────────────────────────────────────────────
 
 def generate_signal(bias: str, sweep: bool, fvg: dict | None,
-                    bos: bool, price: float, killzone: bool) -> tuple[str, int]:
+                    bos: bool, price: float) -> tuple[str, int]:
+    """
+    ICT Score (max 7) — threshold 5 to enter:
+      +2  HTF daily bias bullish
+      +2  Liquidity sweep confirmed
+      +2  Break of Structure on MTF (4h)
+      +1  Price inside bullish FVG on LTF (30m)
+    No killzone restriction — trades 24/7.
+    """
     score = 0
 
     if bias == "bullish":
@@ -187,14 +189,11 @@ def generate_signal(bias: str, sweep: bool, fvg: dict | None,
     if sweep:
         score += 2
 
-    if fvg and fvg['type'] == "bullish" and fvg['low'] <= price <= fvg['high']:
-        score += 1  # price inside FVG
-
     if bos:
         score += 2
 
-    if killzone:
-        score += 1  # session bonus
+    if fvg and fvg['type'] == "bullish" and fvg['low'] <= price <= fvg['high']:
+        score += 1  # price inside FVG
 
     if score >= 5:
         return "buy", score
@@ -276,60 +275,65 @@ def _close(sym: str, price: float, reason: str):
 # ─── MAIN TRADING LOOP ────────────────────────────────────────────────────────
 
 async def analyze_coin(sym: str):
+    """
+    3-level ICT timeframe analysis:
+      HTF  90 days  → daily candles    → Bias direction
+      MTF   7 days  → 4h candles       → Structure, BOS, Liquidity Sweep
+      LTF   1 day   → 30min candles    → FVG entry precision
+    """
     coin_id = COIN_IDS[sym]
     try:
-        # Fetch HTF (4h candles via 7 days) and LTF (30m candles via 1 day)
-        # Price already updated by price_loop — use cached value
-        htf_candles, ltf_candles = await asyncio.gather(
-            fetch_ohlc(coin_id, 7),
-            fetch_ohlc(coin_id, 1),
+        # Fetch all 3 timeframes concurrently
+        htf_candles, mtf_candles, ltf_candles = await asyncio.gather(
+            fetch_ohlc(coin_id, 90),   # daily candles → HTF bias
+            fetch_ohlc(coin_id, 7),    # 4h candles    → MTF structure
+            fetch_ohlc(coin_id, 1),    # 30m candles   → LTF FVG entry
         )
-        if not htf_candles or not ltf_candles:
+        if not htf_candles or not mtf_candles or not ltf_candles:
             return
 
         # Use cached price (updated every 30s by price_loop)
         price = coin_state[sym]["last_price"]
         if price == 0.0:
-            # Fallback: fetch individually if price_loop hasn't run yet
             price = await fetch_price(coin_id)
             coin_state[sym]["last_price"] = price
 
-        # 1. HTF Bias
-        bias = get_bias(htf_candles[-20:])
+        # 1. HTF Daily Bias — last 30 daily candles
+        bias = get_bias(htf_candles[-30:])
 
-        # 2. Swing structure on LTF
-        swing_h, swing_l = swing_highs_lows(ltf_candles)
+        # 2. MTF (4h) Swing structure for BOS and liquidity levels
+        swing_h, swing_l = swing_highs_lows(mtf_candles)
 
-        # 3. Break of Structure
-        bos = detect_bos(ltf_candles, swing_h, swing_l, bias)
+        # 3. Break of Structure on MTF (4h)
+        bos = detect_bos(mtf_candles, swing_h, swing_l, bias)
 
-        # 4. Liquidity levels (equal highs)
-        highs_vals = [c['high'] for c in ltf_candles[-30:]]
-        lows_vals  = [c['low']  for c in ltf_candles[-30:]]
+        # 4. Liquidity levels from MTF (equal highs/lows on 4h)
+        highs_vals = [c['high'] for c in mtf_candles[-40:]]
+        lows_vals  = [c['low']  for c in mtf_candles[-40:]]
         eq_highs = detect_equal_levels(highs_vals)
         eq_lows  = detect_equal_levels(lows_vals)
         liq_levels = eq_highs if bias == "bullish" else eq_lows
 
-        # 5. Liquidity sweep
+        # 5. Liquidity sweep on MTF
         swept, sweep_level = detect_sweep(price, liq_levels)
 
-        # 6. FVG on LTF
-        fvg = detect_fvg(ltf_candles[-20:])
+        # 6. FVG on LTF (30m) for precise entry
+        fvg = detect_fvg(ltf_candles[-30:])
 
-        # 7. Killzone
-        kz = is_killzone()
+        # 7. Signal — no killzone restriction, trades 24/7
+        signal, score = generate_signal(bias, swept, fvg, bos, price)
 
-        # 8. Signal
-        signal, score = generate_signal(bias, swept, fvg, bos, price, kz)
-
-        # 9. SL / TP
+        # 8. SL / TP
         next_liq = max(eq_highs) if eq_highs else price * 1.04
         sl, tp = calc_sl_tp(price, sweep_level, next_liq, bias)
 
-        # 10. Execute
+        # 9. Execute
         demo_tick(sym, price, signal, sl, tp, score, bias, swept, fvg, bos)
 
-        log.info(f"{sym} ${price:.4f} bias={bias} sweep={swept} bos={bos} fvg={'✓' if fvg else '✗'} kz={kz} score={score} → {signal}")
+        log.info(
+            f"{sym} ${price:.4f} | HTF-bias={bias} | MTF-bos={bos} sweep={swept} "
+            f"| LTF-fvg={'✓' if fvg else '✗'} | score={score} → {signal}"
+        )
 
     except Exception as e:
         log.warning(f"analyze {sym}: {e}")
