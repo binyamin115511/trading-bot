@@ -22,7 +22,8 @@ log = logging.getLogger("ict")
 
 HISTORY_FILE = 'trade_history.json'
 DEMO_BALANCE = 1_000.0
-TRADE_SIZE_USD = 100.0  # $100 קבוע לכל עסקה
+TRADE_SIZE_USD = 100.0   # $100 מרג'ין קבוע לכל עסקה
+LEVERAGE      = 15        # 15x → פוזיציה של $1,500
 
 # ─── CANDLE INTERVAL CONSTANTS (milliseconds) ────────────────────────────────
 MS_5M  =  5 * 60 * 1_000
@@ -48,6 +49,7 @@ COIN_IDS = {v: k for k, v in COINS.items()}
 coin_state: dict[str, dict] = {
     sym: {
         "position": None, "entry": 0.0, "amount": 0.0, "sl": 0.0, "tp": 0.0,
+        "liq_price": 0.0,   # מחיר חיסול (leverage)
         "last_price": 0.0, "last_signal": "hold",
         "fvg": None, "sweep": False, "bias": "range", "bos": False,
         "score": 0,
@@ -277,7 +279,9 @@ def demo_tick(sym: str, price: float, signal: str, sl: float, tp: float, score: 
 
     # Exit check
     if cs["position"] == "long":
-        if price <= cs["sl"]:
+        if price <= cs["liq_price"] and cs["liq_price"] > 0:
+            _close(sym, price, "liquidated")          # margin wipe-out
+        elif price <= cs["sl"]:
             _close(sym, price, "stop-loss")
         elif price >= cs["tp"]:
             _close(sym, price, "take-profit")
@@ -285,12 +289,20 @@ def demo_tick(sym: str, price: float, signal: str, sl: float, tp: float, score: 
             _close(sym, price, "signal-exit")
         return
 
-    # Entry
+    # Entry — margin = TRADE_SIZE_USD, notional = margin × LEVERAGE
     if signal == "buy" and cs["position"] is None and bot_state["demo_balance"] >= TRADE_SIZE_USD:
-        amount = TRADE_SIZE_USD / price
-        cs.update({"amount": amount, "entry": price, "position": "long", "sl": sl, "tp": tp})
-        bot_state["demo_balance"] -= TRADE_SIZE_USD
-        log.info(f"[BUY] {sym} @ ${price:.4f}  SL=${sl:.4f}  TP=${tp:.4f}  score={score}/10")
+        notional = TRADE_SIZE_USD * LEVERAGE          # $1,500 position size
+        amount   = notional / price                   # units of coin
+        liq_price = price * (1 - 1 / LEVERAGE + 0.001)  # ~93.4% of entry for 15x
+        cs.update({
+            "amount": amount, "entry": price, "position": "long",
+            "sl": sl, "tp": tp, "liq_price": liq_price,
+        })
+        bot_state["demo_balance"] -= TRADE_SIZE_USD   # deduct margin only
+        log.info(
+            f"[BUY 15x] {sym} @ ${price:.4f}  "
+            f"notional=${notional:.0f}  SL=${sl:.4f}  TP=${tp:.4f}  LIQ=${liq_price:.4f}  score={score}/10"
+        )
 
 
 def _close(sym: str, price: float, reason: str):
@@ -315,6 +327,7 @@ def _close(sym: str, price: float, reason: str):
         "profit":     round(profit_pct,   6),
         "balance":    round(bot_state["demo_balance"], 2),
         "score":      cs.get("score", 0),
+        "leverage":   LEVERAGE,
     })
     save_history(h)
     cs.update({"position": None, "entry": 0.0, "amount": 0.0, "sl": 0.0, "tp": 0.0})
@@ -492,12 +505,16 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def status():
     h = load_history()
     wins = [t for t in h if t.get("profit", 0) > 0]
+    total_pnl = sum(t.get("profit_usd", 0) for t in h)
     return {
         **bot_state,
         "open_positions": [s for s, cs in coin_state.items() if cs["position"]],
-        "total_trades": len(h),
-        "win_rate": round(len(wins) / len(h), 3) if h else 0,
-        "demo_pnl": round(bot_state["demo_balance"] - DEMO_BALANCE, 2),
+        "total_trades":   len(h),
+        "win_rate":       round(len(wins) / len(h), 3) if h else 0,
+        "demo_pnl":       round(bot_state["demo_balance"] - DEMO_BALANCE, 2),
+        "total_profit":   round(total_pnl, 2),
+        "leverage":       LEVERAGE,
+        "trade_size":     TRADE_SIZE_USD,
     }
 
 
@@ -524,28 +541,37 @@ def reset_demo():
 
 @app.get("/positions")
 def positions_endpoint():
-    """פוזיציות פתוחות עם P&L חי בדולרים."""
+    """פוזיציות פתוחות עם P&L חי, מינוף, מחיר חיסול — הכל בדולרים."""
     result = []
     for sym, cs in coin_state.items():
         if cs["position"] == "long":
-            price = cs["last_price"]
-            entry = cs["entry"]
-            amount = cs["amount"]
-            cost_usd    = amount * entry
+            price       = cs["last_price"]
+            entry       = cs["entry"]
+            amount      = cs["amount"]
+            margin      = TRADE_SIZE_USD
+            notional    = margin * LEVERAGE            # $1,500 notional
             current_val = amount * price
-            pnl_usd     = current_val - cost_usd
+            cost_val    = amount * entry               # = notional at entry
+            pnl_usd     = current_val - cost_val
             pnl_pct     = (price - entry) / entry if entry else 0
+            # Distance to liquidation
+            liq = cs["liq_price"]
+            dist_liq_pct = (price - liq) / price * 100 if liq else 0
             result.append({
                 "symbol":        sym,
-                "entry":         round(entry,       4),
-                "current_price": round(price,       4),
-                "cost_usd":      round(cost_usd,    2),
-                "current_value": round(current_val, 2),
-                "pnl_usd":       round(pnl_usd,     2),
+                "entry":         round(entry,        4),
+                "current_price": round(price,        4),
+                "margin_used":   round(margin,       2),
+                "notional":      round(notional,     2),
+                "current_value": round(current_val,  2),
+                "pnl_usd":       round(pnl_usd,      2),
                 "pnl_pct":       round(pnl_pct * 100, 2),
-                "sl":            round(cs["sl"],    4),
-                "tp":            round(cs["tp"],    4),
+                "sl":            round(cs["sl"],     4),
+                "tp":            round(cs["tp"],     4),
+                "liq_price":     round(liq,          4),
+                "dist_liq_pct":  round(dist_liq_pct, 2),
                 "score":         cs["score"],
+                "leverage":      LEVERAGE,
             })
     return result
 

@@ -3,290 +3,740 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ICT Trading Bot</title>
+<title>ICT Trading Terminal</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; padding: 16px; }
-  h1 { text-align: center; font-size: 1.5rem; margin-bottom: 6px; color: #58a6ff; }
-  .demo-banner { text-align: center; font-size: 0.8rem; background: #1a2d1a; border: 1px solid #3fb950; border-radius: 8px; padding: 6px 14px; margin-bottom: 14px; color: #3fb950; }
-  .top-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; text-align: center; }
-  .card.demo-card { border-color: #3fb950; }
-  .label { font-size: 0.72rem; color: #8b949e; margin-bottom: 4px; }
-  .value { font-size: 1.3rem; font-weight: bold; }
-  .pnl-pos { color: #3fb950; }
-  .pnl-neg { color: #f85149; }
-  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 4px; }
-  .dot-green { background: #3fb950; animation: pulse 1.5s infinite; }
-  .dot-red { background: #f85149; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  .buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
-  button { padding: 9px 18px; border: none; border-radius: 8px; font-size: 0.88rem; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
-  button:hover { opacity: 0.8; }
-  .btn-start { background: #238636; color: white; }
-  .btn-stop  { background: #da3633; color: white; }
-  .btn-reset { background: #30363d; color: #e6edf3; }
-  .section { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
-  .section h3 { font-size: 0.82rem; color: #8b949e; margin-bottom: 8px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-  th, td { padding: 7px 8px; border-bottom: 1px solid #21262d; text-align: right; }
-  th { color: #8b949e; font-weight: 600; font-size: 0.72rem; }
-  .buy  { color: #3fb950; font-weight: bold; }
-  .sell { color: #f85149; font-weight: bold; }
-  .hold { color: #d29922; }
-  .bull { color: #3fb950; }
-  .bear { color: #f85149; }
-  .range { color: #8b949e; }
-  .badge { border-radius: 4px; padding: 2px 5px; font-size: 0.68rem; font-weight: bold; }
-  .badge-green { background: #1f3d1f; color: #3fb950; }
-  .badge-red   { background: #3d1f1f; color: #f85149; }
-  .badge-gray  { background: #21262d; color: #8b949e; }
-  .profit-pos { color: #3fb950; }
-  .profit-neg { color: #f85149; }
-  #log { font-size: 0.68rem; color: #8b949e; text-align: center; margin-top: 8px; }
-  canvas { width: 100% !important; height: 160px !important; }
-  .score-bar { display: inline-block; height: 6px; background: #3fb950; border-radius: 3px; vertical-align: middle; }
+:root {
+  --bg:        #060b14;
+  --bg2:       #0d1421;
+  --card:      rgba(13,22,42,0.92);
+  --border:    rgba(0,212,255,0.12);
+  --border-h:  rgba(0,212,255,0.4);
+  --cyan:      #00d4ff;
+  --green:     #00ff88;
+  --red:       #ff4466;
+  --gold:      #ffd700;
+  --purple:    #a855f7;
+  --text:      #e2eaf5;
+  --muted:     #7d8da8;
+  --dim:       #3d4d63;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', sans-serif;
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 80% 40% at 15% 10%, rgba(0,212,255,0.05) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 85% 85%, rgba(0,255,136,0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 60% at 50% 50%, rgba(168,85,247,0.02) 0%, transparent 70%);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 14px 18px;
+}
+/* ── HEADER ─────────────────────────────────────────────────── */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.logo {
+  font-size: 1.35rem; font-weight: 700; letter-spacing: -0.5px;
+  background: linear-gradient(90deg, var(--cyan), var(--green));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  display: flex; align-items: center; gap: 8px;
+}
+.logo-icon { font-size: 1.6rem; -webkit-text-fill-color: initial; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.demo-tag {
+  background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.25);
+  color: var(--cyan); font-size: 0.72rem; font-weight: 600;
+  padding: 4px 10px; border-radius: 20px; letter-spacing: 0.5px;
+}
+.lev-tag {
+  background: rgba(255,215,0,0.12); border: 1px solid rgba(255,215,0,0.3);
+  color: var(--gold); font-size: 0.72rem; font-weight: 700;
+  padding: 4px 10px; border-radius: 20px;
+}
+.status-pill {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2);
+  border-radius: 20px; padding: 4px 12px; font-size: 0.76rem; font-weight: 600;
+  color: var(--green);
+}
+.status-pill.offline { background: rgba(255,68,102,0.08); border-color: rgba(255,68,102,0.2); color: var(--red); }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.pulse.on  { animation: glow-pulse 1.4s ease-in-out infinite; }
+.pulse.off { background: var(--red); }
+@keyframes glow-pulse {
+  0%,100% { opacity:1; box-shadow: 0 0 0 0 rgba(0,255,136,0.6); }
+  50% { opacity:0.7; box-shadow: 0 0 0 5px rgba(0,255,136,0); }
+}
+/* ── STATS ROW ───────────────────────────────────────────────── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.stat-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 13px 15px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  position: relative; overflow: hidden;
+}
+.stat-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0;
+}
+.stat-card:hover { border-color: var(--border-h); box-shadow: 0 0 20px rgba(0,212,255,0.07); }
+.stat-card:hover::before { opacity: 1; }
+.stat-label { font-size: 0.67rem; color: var(--muted); font-weight: 500; letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 6px; }
+.stat-value { font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 700; }
+.stat-value.cyan   { color: var(--cyan);   text-shadow: 0 0 20px rgba(0,212,255,0.4); }
+.stat-value.green  { color: var(--green);  text-shadow: 0 0 20px rgba(0,255,136,0.4); }
+.stat-value.red    { color: var(--red);    text-shadow: 0 0 20px rgba(255,68,102,0.4); }
+.stat-value.gold   { color: var(--gold);   text-shadow: 0 0 20px rgba(255,215,0,0.4); }
+.stat-value.purple { color: var(--purple); text-shadow: 0 0 20px rgba(168,85,247,0.4); }
+.stat-value.white  { color: var(--text); }
+.stat-sub { font-size: 0.67rem; color: var(--muted); margin-top: 2px; }
+/* ── BUTTONS ─────────────────────────────────────────────────── */
+.actions {
+  display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.btn {
+  padding: 9px 20px; border: none; border-radius: 8px;
+  font-size: 0.82rem; font-weight: 600; cursor: pointer;
+  transition: all 0.2s; font-family: 'Inter', sans-serif;
+  letter-spacing: 0.3px;
+}
+.btn-start { background: linear-gradient(135deg, #1a6e2e, #238636); color: #fff; border: 1px solid #2ea043; }
+.btn-start:hover { box-shadow: 0 0 16px rgba(0,255,136,0.3); }
+.btn-stop  { background: linear-gradient(135deg, #6e1a27, #da3633); color: #fff; border: 1px solid #f85149; }
+.btn-stop:hover  { box-shadow: 0 0 16px rgba(255,68,102,0.3); }
+.btn-reset { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
+.btn-reset:hover { border-color: var(--border-h); color: var(--text); }
+/* ── SECTION ─────────────────────────────────────────────────── */
+.section { margin-bottom: 14px; }
+.section-title {
+  font-size: 0.72rem; font-weight: 600; color: var(--muted);
+  letter-spacing: 1px; text-transform: uppercase;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.section-title::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+/* ── COIN CARDS GRID ─────────────────────────────────────────── */
+.coins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.coin-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px 16px;
+  transition: all 0.25s; position: relative; overflow: hidden;
+}
+.coin-card:hover { border-color: var(--border-h); box-shadow: 0 4px 30px rgba(0,212,255,0.07); }
+.coin-card.has-position { border-color: rgba(0,255,136,0.35); box-shadow: 0 0 20px rgba(0,255,136,0.07); }
+.coin-card.has-position::after {
+  content: 'LONG 15×'; position: absolute; top: 0; left: 0;
+  background: linear-gradient(135deg, rgba(0,255,136,0.2), rgba(0,255,136,0.05));
+  color: var(--green); font-size: 0.6rem; font-weight: 700; letter-spacing: 1px;
+  padding: 3px 8px; border-radius: 0 0 8px 0;
+}
+.coin-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.coin-name { font-size: 1rem; font-weight: 700; letter-spacing: -0.3px; }
+.coin-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem; font-weight: 700; color: var(--cyan);
+  text-shadow: 0 0 15px rgba(0,212,255,0.35);
+}
+.coin-price.up   { color: var(--green); text-shadow: 0 0 15px rgba(0,255,136,0.35); }
+.coin-price.down { color: var(--red);   text-shadow: 0 0 15px rgba(255,68,102,0.35); }
+
+/* TF BIAS ROW */
+.tf-row { display: flex; gap: 5px; align-items: center; margin-bottom: 9px; flex-wrap: wrap; }
+.tf-pill {
+  font-size: 0.62rem; font-weight: 600; padding: 2px 7px; border-radius: 5px;
+  letter-spacing: 0.3px;
+}
+.tf-bull { background: rgba(0,255,136,0.12); color: var(--green); border: 1px solid rgba(0,255,136,0.25); }
+.tf-bear { background: rgba(255,68,102,0.12); color: var(--red);   border: 1px solid rgba(255,68,102,0.25); }
+.tf-flat { background: rgba(125,141,168,0.1); color: var(--muted); border: 1px solid rgba(125,141,168,0.2); }
+
+/* SIGNAL BADGES ROW */
+.badge-row { display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
+.sig-badge {
+  font-size: 0.62rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;
+  letter-spacing: 0.3px;
+}
+.sig-on  { background: rgba(0,212,255,0.12); color: var(--cyan);  border: 1px solid rgba(0,212,255,0.3); }
+.sig-off { background: rgba(40,50,70,0.5);   color: var(--dim);   border: 1px solid rgba(60,75,100,0.3); }
+
+/* COIN BOTTOM: score + signal */
+.coin-bottom { display: flex; align-items: center; justify-content: space-between; }
+.signal-btn {
+  padding: 5px 14px; border-radius: 7px; font-size: 0.78rem; font-weight: 700;
+  border: none; font-family: 'Inter', sans-serif; letter-spacing: 0.3px;
+}
+.sig-buy  { background: linear-gradient(135deg,rgba(0,255,136,0.2),rgba(0,255,136,0.1)); color: var(--green); border: 1px solid rgba(0,255,136,0.4); box-shadow: 0 0 12px rgba(0,255,136,0.2); }
+.sig-hold { background: rgba(40,50,70,0.6); color: var(--muted); border: 1px solid var(--border); }
+
+/* SPARKLINE */
+.sparkline { width: 100%; height: 36px; margin-top: 8px; display: block; }
+
+/* SCORE RING */
+.score-ring-wrap { display: flex; flex-direction: column; align-items: center; }
+.score-label { font-size: 0.58rem; color: var(--muted); margin-top: 2px; }
+
+/* ── POSITIONS ───────────────────────────────────────────────── */
+.positions-grid { display: flex; flex-direction: column; gap: 10px; }
+.pos-card {
+  background: var(--card); border: 1px solid rgba(0,255,136,0.25);
+  border-radius: 14px; padding: 15px 18px;
+  box-shadow: 0 0 20px rgba(0,255,136,0.05);
+}
+.pos-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.pos-sym { font-size: 1.1rem; font-weight: 700; }
+.pos-lev-badge {
+  background: rgba(255,215,0,0.15); color: var(--gold);
+  border: 1px solid rgba(255,215,0,0.35); border-radius: 6px;
+  font-size: 0.72rem; font-weight: 700; padding: 2px 9px;
+}
+.pos-pnl {
+  font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 700;
+  text-shadow: 0 0 20px rgba(0,255,136,0.5);
+}
+.pos-pnl.neg { color: var(--red); text-shadow: 0 0 20px rgba(255,68,102,0.5); }
+.pos-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.pos-item { }
+.pos-item-label { font-size: 0.65rem; color: var(--muted); margin-bottom: 3px; letter-spacing: 0.5px; }
+.pos-item-val { font-family: 'JetBrains Mono', monospace; font-size: 0.88rem; font-weight: 600; }
+.pos-item-val.cyan   { color: var(--cyan); }
+.pos-item-val.green  { color: var(--green); }
+.pos-item-val.red    { color: var(--red); }
+.pos-item-val.gold   { color: var(--gold); }
+/* TP progress bar */
+.progress-wrap { position: relative; height: 5px; background: rgba(60,75,100,0.4); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+.progress-labels { display: flex; justify-content: space-between; margin-top: 3px; font-size: 0.6rem; color: var(--muted); }
+.liq-bar { width: 2px; height: 100%; background: var(--red); position: absolute; top: 0; }
+
+/* ── HISTORY TABLE ───────────────────────────────────────────── */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.77rem; }
+th { color: var(--muted); font-weight: 600; font-size: 0.67rem; letter-spacing: 0.8px; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid rgba(60,75,100,0.4); text-align: right; }
+td { padding: 9px 10px; border-bottom: 1px solid rgba(30,40,60,0.6); text-align: right; transition: background 0.15s; }
+tr:hover td { background: rgba(0,212,255,0.03); }
+.td-win { color: var(--green); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.td-loss { color: var(--red);   font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.td-mono { font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; }
+.reason-tag {
+  display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 0.65rem; font-weight: 600;
+}
+.r-tp  { background: rgba(0,255,136,0.12); color: var(--green); border: 1px solid rgba(0,255,136,0.2); }
+.r-sl  { background: rgba(255,68,102,0.12); color: var(--red);   border: 1px solid rgba(255,68,102,0.2); }
+.r-liq { background: rgba(255,165,0,0.12);  color: #ff9500;      border: 1px solid rgba(255,165,0,0.25); }
+.r-sig { background: rgba(125,141,168,0.12);color: var(--muted); border: 1px solid rgba(125,141,168,0.2); }
+/* ── FOOTER LOG ──────────────────────────────────────────────── */
+.log-bar {
+  text-align: center; font-size: 0.67rem; color: var(--dim);
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid rgba(40,55,75,0.4);
+  font-family: 'JetBrains Mono', monospace;
+}
+/* ── BTC CHART ───────────────────────────────────────────────── */
+.big-chart-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px;
+}
+#btcChart { width: 100%; height: 120px; display: block; }
+
+/* ── EMPTY STATE ─────────────────────────────────────────────── */
+.empty-state {
+  text-align: center; color: var(--muted); padding: 28px;
+  font-size: 0.82rem;
+}
 </style>
 </head>
 <body>
-<h1>🧠 ICT Trading Bot</h1>
-<div class="demo-banner">🎮 מצב דמו — ללא כסף אמיתי | ICT: 30D · 7D · 1D · 4H · 1H · 30M · 15M · 5M | סף כניסה: 6/10</div>
 
-<div class="top-grid">
-  <div class="card demo-card">
-    <div class="label">יתרה דמו</div>
-    <div class="value" id="demoBalance">$1,000</div>
+<!-- ── HEADER ── -->
+<div class="header">
+  <div class="logo">
+    <span class="logo-icon">🧠</span> ICT Trading Terminal
   </div>
-  <div class="card demo-card">
-    <div class="label">רווח / הפסד</div>
-    <div class="value" id="demoPnl">$0.00</div>
-  </div>
-  <div class="card">
-    <div class="label">סטטוס</div>
-    <div class="value" id="status">—</div>
-  </div>
-  <div class="card">
-    <div class="label">פוזיציות פתוחות</div>
-    <div class="value" id="openCount">0</div>
-  </div>
-  <div class="card">
-    <div class="label">אחוז ניצחון</div>
-    <div class="value" id="winrate">—</div>
-  </div>
-  <div class="card">
-    <div class="label">סך עסקאות</div>
-    <div class="value" id="trades">0</div>
+  <div class="header-right">
+    <span class="demo-tag">🎮 DEMO</span>
+    <span class="lev-tag">⚡ 15× LEVERAGE</span>
+    <div class="status-pill" id="statusPill">
+      <div class="pulse on" id="pulseDot"></div>
+      <span id="statusText">מחבר...</span>
+    </div>
   </div>
 </div>
 
-<div class="buttons">
-  <button class="btn-start" onclick="action('start')">▶ הפעל</button>
-  <button class="btn-stop"  onclick="action('stop')">■ עצור</button>
-  <button class="btn-reset" onclick="resetDemo()">↺ אפס דמו</button>
+<!-- ── STATS ROW ── -->
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-label">💰 יתרת דמו</div>
+    <div class="stat-value cyan" id="sBalance">$1,000.00</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">📈 רווח / הפסד</div>
+    <div class="stat-value green" id="sPnl">$0.00</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">⚡ מינוף × פוזיציה</div>
+    <div class="stat-value gold" id="sLev">15× / $1,500</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">📂 פוזיציות פתוחות</div>
+    <div class="stat-value purple" id="sOpen">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">🎯 אחוז ניצחון</div>
+    <div class="stat-value white" id="sWin">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">🔢 סך עסקאות</div>
+    <div class="stat-value white" id="sTrades">0</div>
+    <div class="stat-sub" id="sSubStrategy">ICT · 30D 7D 1D 4H 1H 30M 15M 5M · סף 6/10</div>
+  </div>
 </div>
 
+<!-- ── ACTIONS ── -->
+<div class="actions">
+  <button class="btn btn-start" onclick="action('start')">▶ הפעל בוט</button>
+  <button class="btn btn-stop"  onclick="action('stop')">■ עצור</button>
+  <button class="btn btn-reset" onclick="resetDemo()">↺ אפס דמו</button>
+</div>
+
+<!-- ── BTC CHART ── -->
+<div class="big-chart-card">
+  <div class="section-title" style="margin-bottom:8px">📈 BTC — מחיר חי</div>
+  <canvas id="btcChart"></canvas>
+</div>
+
+<!-- ── COIN CARDS GRID ── -->
 <div class="section">
-  <h3>📊 ניתוח ICT לכל מטבע — 8 טיימפריימים</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>מטבע</th><th>מחיר</th>
-        <th>30D</th><th>7D</th><th>1D</th>
-        <th>Sweep</th><th>BOS 4H</th><th>BOS 1H</th><th>FVG</th>
-        <th>סקור/10</th><th>סיגנל</th><th>פוזיציה</th>
-      </tr>
-    </thead>
-    <tbody id="coinsTable"></tbody>
-  </table>
+  <div class="section-title">📊 ניתוח ICT — 8 טיימפריימים</div>
+  <div class="coins-grid" id="coinsGrid"></div>
 </div>
 
+<!-- ── POSITIONS ── -->
 <div class="section">
-  <h3>💼 פוזיציות פתוחות — רווח/הפסד חי בדולרים</h3>
-  <table>
-    <thead>
-      <tr><th>מטבע</th><th>כניסה $</th><th>מחיר כעת $</th><th>שווי $</th><th>רווח/הפסד $</th><th>%</th><th>SL $</th><th>TP $</th><th>סקור</th></tr>
-    </thead>
-    <tbody id="positionsTable"><tr><td colspan="9" style="color:#8b949e;text-align:center">אין פוזיציות פתוחות</td></tr></tbody>
-  </table>
+  <div class="section-title">💼 פוזיציות פתוחות</div>
+  <div class="positions-grid" id="positionsGrid">
+    <div class="empty-state">⏳ אין פוזיציות פתוחות כרגע</div>
+  </div>
 </div>
 
+<!-- ── HISTORY ── -->
 <div class="section">
-  <h3>📈 גרף BTC</h3>
-  <canvas id="chart"></canvas>
+  <div class="section-title">📋 עסקאות אחרונות</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>שעה</th><th>מטבע</th><th>סיבה</th>
+          <th>כניסה $</th><th>יציאה $</th>
+          <th>פוזיציה $</th><th>רווח/הפסד $</th><th>%</th>
+          <th>יתרה $</th>
+        </tr>
+      </thead>
+      <tbody id="historyBody"></tbody>
+    </table>
+  </div>
 </div>
 
-<div class="section">
-  <h3>📋 עסקאות סגורות — רווח/הפסד בדולרים</h3>
-  <table>
-    <thead>
-      <tr><th>שעה</th><th>מטבע</th><th>סיבה</th><th>כניסה $</th><th>יציאה $</th><th>רווח/הפסד $</th><th>%</th><th>יתרה $</th></tr>
-    </thead>
-    <tbody id="historyTable"></tbody>
-  </table>
-</div>
-<div id="log">מתחבר...</div>
+<div class="log-bar" id="logBar">ICT Terminal — מתחבר...</div>
 
 <script>
-const btcPrices = [];
-let ctx;
-const REASON_HE = { signal:'סיגנל','stop-loss':'סטופ לוס','take-profit':'טייק פרופיט','signal-exit':'יציאה' };
+// ── CONFIG ────────────────────────────────────────────────────────────
+const COIN_EMOJI = {BTC:'₿',ETH:'Ξ',BNB:'🔶',SOL:'◎',XRP:'✕',DOGE:'🐕',ADA:'₳',AVAX:'🔺'};
+const REASON_MAP = {'take-profit':'טייק פרופיט','stop-loss':'סטופ לוס','liquidated':'חיסול','signal-exit':'יציאה','signal':'סיגנל'};
+const REASON_CLASS = {'take-profit':'r-tp','stop-loss':'r-sl','liquidated':'r-liq','signal-exit':'r-sig','signal':'r-sig'};
+const priceHistory = {};
+const BTC_PRICES = [];
 
-function initChart() { ctx = document.getElementById('chart').getContext('2d'); }
+function tfClass(b) { return b==='bullish'?'tf-bull':b==='bearish'?'tf-bear':'tf-flat'; }
+function tfArrow(b) { return b==='bullish'?'▲':b==='bearish'?'▼':'—'; }
 
-function drawChart() {
-  if (!ctx || btcPrices.length < 2) return;
-  const canvas = document.getElementById('chart');
-  canvas.width = canvas.offsetWidth; canvas.height = 160;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const min = Math.min(...btcPrices) * 0.9997;
-  const max = Math.max(...btcPrices) * 1.0003;
-  const w = canvas.width, h = canvas.height;
-  const x = i => (i / (btcPrices.length - 1)) * w;
-  const y = p => h - ((p - min) / (max - min)) * h;
-  ctx.fillStyle = 'rgba(88,166,255,0.07)';
+// ── SVG SCORE RING ────────────────────────────────────────────────────
+function scoreRing(score) {
+  const r = 18, cx = 22, cy = 22, max = 10;
+  const circ = 2 * Math.PI * r;
+  const pct  = Math.min(1, Math.max(0, score / max));
+  const off  = circ * (1 - pct);
+  const color = score >= 6 ? '#00ff88' : score >= 4 ? '#ffd700' : '#ff4466';
+  const glow  = score >= 6 ? 'rgba(0,255,136,0.6)' : score >= 4 ? 'rgba(255,215,0,0.6)' : 'rgba(255,68,102,0.6)';
+  return `<svg width="44" height="44" viewBox="0 0 44 44">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(60,75,100,0.5)" stroke-width="3.5"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="3.5"
+      stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"
+      stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})"
+      style="filter:drop-shadow(0 0 5px ${glow});transition:stroke-dashoffset 0.5s"/>
+    <text x="${cx}" y="${cy+1}" text-anchor="middle" dominant-baseline="central"
+      fill="${color}" font-size="12" font-weight="700"
+      font-family="JetBrains Mono,monospace">${score}</text>
+  </svg>`;
+}
+
+// ── SPARKLINE ─────────────────────────────────────────────────────────
+function drawSparkline(canvas, data) {
+  if (!canvas || data.length < 2) return;
+  const w = canvas.offsetWidth || 260, h = 36;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  const min = Math.min(...data) * 0.9998;
+  const max = Math.max(...data) * 1.0002;
+  const range = max - min || 1;
+  const xi = i => (i / (data.length - 1)) * w;
+  const yi = p => h - ((p - min) / range) * (h - 2) - 1;
+  const rising = data[data.length - 1] >= data[0];
+  const color  = rising ? '#00ff88' : '#ff4466';
+  const ctx2 = canvas.getContext('2d');
+  const grad = ctx2.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, rising ? 'rgba(0,255,136,0.25)' : 'rgba(255,68,102,0.25)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx2.beginPath();
+  data.forEach((p, i) => i === 0 ? ctx2.moveTo(xi(i), yi(p)) : ctx2.lineTo(xi(i), yi(p)));
+  ctx2.lineTo(w, h); ctx2.lineTo(0, h); ctx2.closePath();
+  ctx2.fillStyle = grad; ctx2.fill();
+  ctx2.beginPath();
+  data.forEach((p, i) => i === 0 ? ctx2.moveTo(xi(i), yi(p)) : ctx2.lineTo(xi(i), yi(p)));
+  ctx2.strokeStyle = color; ctx2.lineWidth = 1.8;
+  ctx2.shadowColor = color; ctx2.shadowBlur = 6;
+  ctx2.stroke();
+}
+
+function drawBTC(data) {
+  const canvas = document.getElementById('btcChart');
+  if (!canvas || data.length < 2) return;
+  const w = canvas.offsetWidth || 600, h = 120;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  const min = Math.min(...data) * 0.9995;
+  const max = Math.max(...data) * 1.0005;
+  const range = max - min || 1;
+  const xi = i => (i / (data.length - 1)) * w;
+  const yi = p => h - ((p - min) / range) * (h - 8) - 4;
+  // Grid lines
+  ctx.strokeStyle = 'rgba(60,75,100,0.2)'; ctx.lineWidth = 1;
+  for (let k = 1; k < 4; k++) {
+    ctx.beginPath(); ctx.moveTo(0, h*k/4); ctx.lineTo(w, h*k/4); ctx.stroke();
+  }
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(0,212,255,0.18)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.beginPath();
-  btcPrices.forEach((p,i) => i===0 ? ctx.moveTo(x(i),y(p)) : ctx.lineTo(x(i),y(p)));
-  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.fill();
-  ctx.strokeStyle='#58a6ff'; ctx.lineWidth=2;
+  data.forEach((p, i) => i === 0 ? ctx.moveTo(xi(i), yi(p)) : ctx.lineTo(xi(i), yi(p)));
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+  // Line
   ctx.beginPath();
-  btcPrices.forEach((p,i) => i===0 ? ctx.moveTo(x(i),y(p)) : ctx.lineTo(x(i),y(p)));
+  data.forEach((p, i) => i === 0 ? ctx.moveTo(xi(i), yi(p)) : ctx.lineTo(xi(i), yi(p)));
+  ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 2;
+  ctx.shadowColor = '#00d4ff'; ctx.shadowBlur = 8;
   ctx.stroke();
+  // Last price label
+  const last = data[data.length - 1];
+  const lx = w - 4, ly = yi(last);
+  ctx.fillStyle = '#00d4ff'; ctx.font = 'bold 10px JetBrains Mono,monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('$' + last.toLocaleString(undefined, {maximumFractionDigits:0}), lx, Math.max(14, ly - 4));
+  ctx.textAlign = 'start';
 }
 
-function badge(val, trueClass, falseClass, trueText, falseText) {
-  return val
-    ? `<span class="badge ${trueClass}">${trueText}</span>`
-    : `<span class="badge ${falseClass}">${falseText}</span>`;
+// ── COIN CARD ─────────────────────────────────────────────────────────
+function coinCard(c) {
+  const sym   = c.symbol;
+  const price = c.price ? c.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4}) : '—';
+  const hist  = priceHistory[sym] || [];
+  const rising = hist.length >= 2 ? hist[hist.length-1] >= hist[hist.length-2] : true;
+  const priceClass = !c.price ? '' : rising ? 'up' : 'down';
+  const hasSig = c.signal === 'buy';
+  return `<div class="coin-card ${c.position ? 'has-position':''}" id="card-${sym}">
+    <div class="coin-top">
+      <span class="coin-name">${COIN_EMOJI[sym]||''} ${sym}</span>
+      <span class="coin-price ${priceClass}">$${price}</span>
+    </div>
+    <div class="tf-row">
+      <span class="tf-pill ${tfClass(c.bias_30d||c.bias)}">30D ${tfArrow(c.bias_30d||c.bias)}</span>
+      <span class="tf-pill ${tfClass(c.bias_7d||c.bias)}">7D ${tfArrow(c.bias_7d||c.bias)}</span>
+      <span class="tf-pill ${tfClass(c.bias_1d||c.bias)}">1D ${tfArrow(c.bias_1d||c.bias)}</span>
+    </div>
+    <div class="badge-row">
+      <span class="sig-badge ${c.bos_4h?'sig-on':'sig-off'}">BOS 4H ${c.bos_4h?'✓':'—'}</span>
+      <span class="sig-badge ${c.bos_1h?'sig-on':'sig-off'}">BOS 1H ${c.bos_1h?'✓':'—'}</span>
+      <span class="sig-badge ${c.sweep?'sig-on':'sig-off'}">Sweep ${c.sweep?'✓':'—'}</span>
+      <span class="sig-badge ${c.fvg?'sig-on':'sig-off'}">FVG ${c.fvg?'✓':'—'}</span>
+    </div>
+    <div class="coin-bottom">
+      <div class="score-ring-wrap">
+        ${scoreRing(c.score||0)}
+        <span class="score-label">סקור/10</span>
+      </div>
+      <button class="signal-btn ${hasSig?'sig-buy':'sig-hold'}">
+        ${hasSig ? '🟢 קנה ← ICT' : '⏸ המתן'}
+      </button>
+    </div>
+    <canvas class="sparkline" id="spark-${sym}"></canvas>
+  </div>`;
 }
 
-function scoreBar(score) {
-  const pct = Math.min(100, Math.max(0, (score / 10) * 100));
-  const color = score >= 6 ? '#3fb950' : score >= 4 ? '#d29922' : '#f85149';
-  return `<span style="display:inline-flex;align-items:center;gap:4px">
-    <span style="width:40px;height:5px;background:#21262d;border-radius:3px;display:inline-block">
-      <span style="width:${pct}%;height:100%;background:${color};border-radius:3px;display:block"></span>
-    </span>
-    <b style="color:${color}">${score}</b>
-  </span>`;
+// ── POSITION CARD ─────────────────────────────────────────────────────
+function posCard(p) {
+  const pnlPos = p.pnl_usd >= 0;
+  const pnlSign = pnlPos ? '+' : '-';
+  const pnlClass = pnlPos ? '' : 'neg';
+  // TP progress: how far from entry to TP
+  const range = p.tp - p.entry;
+  const curr  = p.current_price - p.entry;
+  const pct   = range > 0 ? Math.max(0, Math.min(100, (curr / range) * 100)) : 0;
+  const barColor = pnlPos ? '#00ff88' : '#ff4466';
+  // Liq marker as % of full bar
+  const liqPct = range > 0 ? Math.max(0, Math.min(100, ((p.liq_price - p.entry) / range) * 100)) : 0;
+  const distLiq = p.dist_liq_pct ? p.dist_liq_pct.toFixed(1) : '—';
+  return `<div class="pos-card">
+    <div class="pos-header">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="pos-sym">${COIN_EMOJI[p.symbol]||''} ${p.symbol}</span>
+        <span class="pos-lev-badge">⚡ ${p.leverage||15}× LONG</span>
+      </div>
+      <div>
+        <div class="pos-pnl ${pnlClass}">${pnlSign}$${Math.abs(p.pnl_usd).toFixed(2)}</div>
+        <div style="font-size:0.68rem;color:${pnlPos?'#00ff88':'#ff4466'};text-align:left">${pnlSign}${Math.abs(p.pnl_pct).toFixed(2)}%</div>
+      </div>
+    </div>
+    <div class="pos-grid3">
+      <div class="pos-item">
+        <div class="pos-item-label">כניסה</div>
+        <div class="pos-item-val cyan">$${p.entry.toLocaleString(undefined,{maximumFractionDigits:4})}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-item-label">מחיר נוכחי</div>
+        <div class="pos-item-val ${pnlPos?'green':'red'}">$${p.current_price.toLocaleString(undefined,{maximumFractionDigits:4})}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-item-label">שווי פוזיציה</div>
+        <div class="pos-item-val gold">$${p.current_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-item-label">מרג'ין שהושקע</div>
+        <div class="pos-item-val">$${(p.margin_used||100).toFixed(2)}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-item-label">⛔ SL</div>
+        <div class="pos-item-val red">$${p.sl.toLocaleString(undefined,{maximumFractionDigits:4})}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-item-label">🎯 TP</div>
+        <div class="pos-item-val green">$${p.tp.toLocaleString(undefined,{maximumFractionDigits:4})}</div>
+      </div>
+    </div>
+    <div style="margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;font-size:0.66rem;color:var(--muted);margin-bottom:4px">
+        <span>💥 חיסול: $${p.liq_price.toLocaleString(undefined,{maximumFractionDigits:4})}</span>
+        <span>מרחק מחיסול: ${distLiq}%</span>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-fill" style="width:${pct}%;background:${barColor};box-shadow:0 0 8px ${barColor}66"></div>
+        <div class="liq-bar" style="right:${Math.max(0,100-liqPct)}%"></div>
+      </div>
+      <div class="progress-labels"><span>Entry</span><span>← TP →</span></div>
+    </div>
+    <div style="font-size:0.66rem;color:var(--muted)">סקור ICT: <b style="color:var(--cyan)">${p.score}/10</b></div>
+  </div>`;
 }
 
-function biasBadge(b) {
-  if (b === 'bullish') return `<span style="color:#3fb950;font-size:0.72rem">▲</span>`;
-  if (b === 'bearish') return `<span style="color:#f85149;font-size:0.72rem">▼</span>`;
-  return `<span style="color:#8b949e;font-size:0.72rem">—</span>`;
+// ── HISTORY ROW ───────────────────────────────────────────────────────
+function histRow(t) {
+  const pnl = t.profit_usd ?? 0;
+  const pos = t.cost_usd ?? 100;
+  const notional = pos * (t.leverage || 1);
+  const pnlClass = pnl >= 0 ? 'td-win' : 'td-loss';
+  const sign = pnl >= 0 ? '+' : '';
+  const rClass = REASON_CLASS[t.reason] || 'r-sig';
+  const rText  = REASON_MAP[t.reason]   || t.reason;
+  const time   = new Date(t.time).toLocaleTimeString('he-IL', {hour:'2-digit',minute:'2-digit'});
+  return `<tr>
+    <td class="td-mono">${time}</td>
+    <td><b>${t.symbol||''}</b></td>
+    <td><span class="reason-tag ${rClass}">${rText}</span></td>
+    <td class="td-mono">$${(t.entry||0).toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+    <td class="td-mono">$${(t.exit||0).toLocaleString(undefined,{maximumFractionDigits:4})}</td>
+    <td class="td-mono">$${notional.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+    <td class="${pnlClass}">${sign}$${Math.abs(pnl).toFixed(2)}</td>
+    <td class="${pnlClass}">${sign}${((t.profit||0)*100).toFixed(2)}%</td>
+    <td class="td-mono">$${(t.balance||0).toFixed(2)}</td>
+  </tr>`;
 }
 
-function updateUI(status, coins) {
-  document.getElementById('demoBalance').textContent =
-    '$' + status.demo_balance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-  const pnl = status.demo_pnl || 0;
-  const pnlEl = document.getElementById('demoPnl');
-  pnlEl.textContent = (pnl>=0?'+':'-') + '$' + Math.abs(pnl).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-  pnlEl.className = 'value ' + (pnl>=0?'pnl-pos':'pnl-neg');
-  document.getElementById('status').innerHTML = status.running
-    ? `פעיל<span class="status-dot dot-green"></span>`
-    : `עצור<span class="status-dot dot-red"></span>`;
-  document.getElementById('openCount').textContent = (status.open_positions||[]).length;
-  document.getElementById('winrate').textContent = status.total_trades ? (status.win_rate*100).toFixed(1)+'%' : '—';
-  document.getElementById('trades').textContent = status.total_trades||0;
-
-  document.getElementById('coinsTable').innerHTML = coins.map(c => {
-    const price = c.price ? '$'+c.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4}) : '—';
-    const sigClass = c.signal==='buy'?'buy':c.signal==='sell'?'sell':'hold';
-    const sigHe = c.signal==='buy'?'🟢 קנה':c.signal==='sell'?'🔴 מכור':'⏸ המתן';
-    const pos = c.position ? `<span class="badge badge-green">LONG</span>` : '—';
-    return `<tr>
-      <td><b>${c.symbol}</b></td>
-      <td>${price}</td>
-      <td>${biasBadge(c.bias_30d||c.bias)}</td>
-      <td>${biasBadge(c.bias_7d||c.bias)}</td>
-      <td>${biasBadge(c.bias_1d||c.bias)}</td>
-      <td>${badge(c.sweep,'badge-green','badge-gray','✓','—')}</td>
-      <td>${badge(c.bos_4h,'badge-green','badge-gray','✓','—')}</td>
-      <td>${badge(c.bos_1h,'badge-green','badge-gray','✓','—')}</td>
-      <td>${badge(c.fvg,'badge-green','badge-gray','✓','—')}</td>
-      <td>${scoreBar(c.score||0)}</td>
-      <td class="${sigClass}"><b>${sigHe}</b></td>
-      <td>${pos}</td>
-    </tr>`;
-  }).join('');
-
-  const btc = coins.find(c=>c.symbol==='BTC');
-  if (btc && btc.price) { btcPrices.push(btc.price); if(btcPrices.length>100)btcPrices.shift(); drawChart(); }
+// ── MAIN UPDATE ───────────────────────────────────────────────────────
+function updateStats(s) {
+  const bal = s.demo_balance || 0;
+  const pnl = s.demo_pnl    || 0;
+  const lev = s.leverage     || 15;
+  const tsz = s.trade_size   || 100;
+  document.getElementById('sBalance').textContent = '$' + bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pnlEl = document.getElementById('sPnl');
+  pnlEl.textContent = (pnl>=0?'+':'')+`$${Math.abs(pnl).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  pnlEl.className = 'stat-value ' + (pnl >= 0 ? 'green' : 'red');
+  document.getElementById('sLev').textContent  = `${lev}× / $${(tsz*lev).toLocaleString()}`;
+  document.getElementById('sOpen').textContent = (s.open_positions||[]).length;
+  document.getElementById('sWin').textContent  = s.total_trades ? (s.win_rate*100).toFixed(1)+'%' : '—';
+  document.getElementById('sTrades').textContent = s.total_trades || 0;
+  const running = s.running;
+  const pill = document.getElementById('statusPill');
+  const dot  = document.getElementById('pulseDot');
+  const txt  = document.getElementById('statusText');
+  pill.className = 'status-pill' + (running ? '' : ' offline');
+  dot.className  = 'pulse ' + (running ? 'on' : 'off');
+  txt.textContent = running ? 'פעיל' : 'עצור';
 }
 
+function updateCoins(coins) {
+  // Update price history
+  coins.forEach(c => {
+    if (c.price) {
+      if (!priceHistory[c.symbol]) priceHistory[c.symbol] = [];
+      priceHistory[c.symbol].push(c.price);
+      if (priceHistory[c.symbol].length > 80) priceHistory[c.symbol].shift();
+    }
+    if (c.symbol === 'BTC' && c.price) {
+      BTC_PRICES.push(c.price);
+      if (BTC_PRICES.length > 150) BTC_PRICES.shift();
+      drawBTC(BTC_PRICES);
+    }
+  });
+
+  const grid = document.getElementById('coinsGrid');
+  // Check if grid needs rebuild (first time or symbol change)
+  if (grid.children.length !== coins.length) {
+    grid.innerHTML = coins.map(coinCard).join('');
+  } else {
+    // Patch individual cards
+    coins.forEach(c => {
+      const card = document.getElementById('card-' + c.symbol);
+      if (!card) return;
+      // Update price
+      const priceEl = card.querySelector('.coin-price');
+      const hist = priceHistory[c.symbol] || [];
+      const rising = hist.length >= 2 ? hist[hist.length-1] >= hist[hist.length-2] : true;
+      if (priceEl) {
+        priceEl.textContent = c.price ? '$' + c.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4}) : '—';
+        priceEl.className = 'coin-price ' + (!c.price ? '' : rising ? 'up' : 'down');
+      }
+      // Update position class
+      card.className = 'coin-card ' + (c.position ? 'has-position' : '');
+      // Re-render score ring
+      const scoreWrap = card.querySelector('.score-ring-wrap');
+      if (scoreWrap) scoreWrap.innerHTML = scoreRing(c.score||0) + '<span class="score-label">סקור/10</span>';
+      // Signal button
+      const sigBtn = card.querySelector('.signal-btn');
+      if (sigBtn) {
+        const buy = c.signal === 'buy';
+        sigBtn.className = 'signal-btn ' + (buy ? 'sig-buy' : 'sig-hold');
+        sigBtn.textContent = buy ? '🟢 קנה ← ICT' : '⏸ המתן';
+      }
+      // TF pills
+      const pills = card.querySelectorAll('.tf-pill');
+      if (pills.length === 3) {
+        const biases = [c.bias_30d||c.bias, c.bias_7d||c.bias, c.bias_1d||c.bias];
+        const labels = ['30D','7D','1D'];
+        pills.forEach((p,i) => {
+          p.className = 'tf-pill ' + tfClass(biases[i]);
+          p.textContent = labels[i] + ' ' + tfArrow(biases[i]);
+        });
+      }
+      // Badges
+      const badges = card.querySelectorAll('.sig-badge');
+      if (badges.length === 4) {
+        const states = [c.bos_4h, c.bos_1h, c.sweep, c.fvg];
+        const names  = ['BOS 4H','BOS 1H','Sweep','FVG'];
+        badges.forEach((b,i) => {
+          b.className = 'sig-badge ' + (states[i] ? 'sig-on' : 'sig-off');
+          b.textContent = names[i] + ' ' + (states[i] ? '✓' : '—');
+        });
+      }
+    });
+  }
+  // Redraw sparklines
+  coins.forEach(c => {
+    const canvas = document.getElementById('spark-' + c.symbol);
+    if (canvas) drawSparkline(canvas, priceHistory[c.symbol] || []);
+  });
+}
+
+function updatePositions(data) {
+  const grid = document.getElementById('positionsGrid');
+  if (!data.length) {
+    grid.innerHTML = '<div class="empty-state">⏳ אין פוזיציות פתוחות כרגע</div>';
+    return;
+  }
+  grid.innerHTML = data.map(posCard).join('');
+}
+
+function updateHistory(data) {
+  const tbody = document.getElementById('historyBody');
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">עדיין אין עסקאות סגורות</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.slice(-30).reverse().map(histRow).join('');
+}
+
+// ── POLLING ───────────────────────────────────────────────────────────
 async function poll() {
   try {
     const [sr, cr] = await Promise.all([fetch('/status'), fetch('/coins')]);
+    if (!sr.ok || !cr.ok) throw new Error('server error');
     const status = await sr.json();
     const coins  = await cr.json();
-    updateUI(status, coins);
-    document.getElementById('log').textContent = 'ICT Bot פעיל ✓  ' + new Date().toLocaleTimeString('he-IL');
-  } catch(e) { document.getElementById('log').textContent = 'שגיאה — מנסה שוב...'; }
+    updateStats(status);
+    updateCoins(coins);
+    document.getElementById('logBar').textContent =
+      'ICT Terminal ✓  עודכן: ' + new Date().toLocaleTimeString('he-IL') +
+      '  |  8 טיימפריימים: 30D 7D 1D 4H 1H 30M 15M 5M  |  ⚡ מינוף 15×';
+  } catch(e) {
+    document.getElementById('logBar').textContent = '⚠ שגיאת חיבור — מנסה שוב...';
+  }
 }
 
-async function fetchPositions() {
+async function pollPositions() {
   try {
     const r = await fetch('/positions');
-    const data = await r.json();
-    const tbody = document.getElementById('positionsTable');
-    if (!data.length) {
-      tbody.innerHTML = '<tr><td colspan="9" style="color:#8b949e;text-align:center">אין פוזיציות פתוחות</td></tr>';
-      return;
-    }
-    tbody.innerHTML = data.map(p => {
-      const pnlClass = p.pnl_usd >= 0 ? 'profit-pos' : 'profit-neg';
-      const pnlSign  = p.pnl_usd >= 0 ? '+' : '';
-      return `<tr>
-        <td><b>${p.symbol}</b></td>
-        <td>$${p.entry.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
-        <td>$${p.current_price.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
-        <td>$${p.current_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-        <td class="${pnlClass}"><b>${pnlSign}$${Math.abs(p.pnl_usd).toFixed(2)}</b></td>
-        <td class="${pnlClass}">${pnlSign}${p.pnl_pct.toFixed(2)}%</td>
-        <td style="color:#f85149">$${p.sl.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
-        <td style="color:#3fb950">$${p.tp.toLocaleString(undefined,{maximumFractionDigits:4})}</td>
-        <td><b>${p.score}</b></td>
-      </tr>`;
-    }).join('');
+    updatePositions(await r.json());
   } catch(e) {}
 }
 
-async function fetchHistory() {
-  const r = await fetch('/history');
-  const data = await r.json();
-  const tbody = document.getElementById('historyTable');
-  if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="color:#8b949e;text-align:center">עדיין אין עסקאות סגורות</td></tr>';
-    return;
-  }
-  tbody.innerHTML = data.slice(-30).reverse().map(t => {
-    const pnlUsd = t.profit_usd ?? (t.profit * (t.cost_usd || 10));
-    const pnlClass = pnlUsd >= 0 ? 'profit-pos' : 'profit-neg';
-    const pnlSign  = pnlUsd >= 0 ? '+' : '';
-    return `<tr>
-      <td>${new Date(t.time).toLocaleTimeString('he-IL')}</td>
-      <td><b>${(t.symbol||'')}</b></td>
-      <td>${REASON_HE[t.reason]||t.reason}</td>
-      <td>$${(t.entry||0).toLocaleString(undefined,{maximumFractionDigits:4})}</td>
-      <td>$${(t.exit||0).toLocaleString(undefined,{maximumFractionDigits:4})}</td>
-      <td class="${pnlClass}"><b>${pnlSign}$${Math.abs(pnlUsd).toFixed(2)}</b></td>
-      <td class="${pnlClass}">${pnlSign}${(t.profit*100).toFixed(2)}%</td>
-      <td>$${(t.balance||0).toFixed(2)}</td>
-    </tr>`;
-  }).join('');
+async function pollHistory() {
+  try {
+    const r = await fetch('/history');
+    updateHistory(await r.json());
+  } catch(e) {}
 }
 
-async function action(a) { await fetch('/'+a,{method:'POST'}); setTimeout(poll,500); }
+async function action(a) {
+  await fetch('/' + a, {method:'POST'});
+  setTimeout(poll, 400);
+}
+
 async function resetDemo() {
-  if(!confirm('לאפס?')) return;
-  await fetch('/reset-demo',{method:'POST'}); poll(); fetchHistory();
+  if (!confirm('לאפס את הדמו? כל העסקאות יימחקו.')) return;
+  await fetch('/reset-demo', {method:'POST'});
+  poll(); pollPositions(); pollHistory();
 }
 
-initChart(); poll(); fetchPositions(); fetchHistory();
-setInterval(poll, 5000);
-setInterval(fetchPositions, 6000);
-setInterval(fetchHistory, 15000);
+// ── INIT ──────────────────────────────────────────────────────────────
+poll(); pollPositions(); pollHistory();
+setInterval(poll,          5000);
+setInterval(pollPositions, 6000);
+setInterval(pollHistory,  15000);
 </script>
 </body>
 </html>
