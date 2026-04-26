@@ -300,7 +300,7 @@ tr:hover td { background: rgba(0,212,255,0.03); }
   <div class="stat-card">
     <div class="stat-label">🔢 סך עסקאות</div>
     <div class="stat-value white" id="sTrades">0</div>
-    <div class="stat-sub" id="sSubStrategy">MSNR · 1D 4H 1H 15M 5M · סף כניסה 6/10</div>
+    <div class="stat-sub" id="sSubStrategy">MSNR · Crypto ×8 + NQ + ES · סף 6/10</div>
   </div>
 </div>
 
@@ -353,7 +353,8 @@ tr:hover td { background: rgba(0,212,255,0.03); }
 
 <script>
 // ── CONFIG ────────────────────────────────────────────────────────────
-const COIN_EMOJI = {BTC:'₿',ETH:'Ξ',BNB:'🔶',SOL:'◎',XRP:'✕',DOGE:'🐕',ADA:'₳',AVAX:'🔺'};
+const COIN_EMOJI = {BTC:'₿',ETH:'Ξ',BNB:'🔶',SOL:'◎',XRP:'✕',DOGE:'🐕',ADA:'₳',AVAX:'🔺',NQ:'📊',ES:'📈'};
+const FUTURES_SET = new Set(['NQ','ES']);
 const REASON_MAP = {'take-profit':'טייק פרופיט','stop-loss':'סטופ לוס','liquidated':'חיסול','signal-exit':'יציאה','signal':'סיגנל'};
 const REASON_CLASS = {'take-profit':'r-tp','stop-loss':'r-sl','liquidated':'r-liq','signal-exit':'r-sig','signal':'r-sig'};
 const priceHistory = {};
@@ -475,9 +476,13 @@ function coinCard(c) {
   const rising = hist.length >= 2 ? hist[hist.length-1] >= hist[hist.length-2] : true;
   const priceClass = !c.price ? '' : rising ? 'up' : 'down';
   const hasSig = c.signal === 'buy';
+  const isFutures = FUTURES_SET.has(sym);
+  const marketTag = isFutures
+    ? `<span style="font-size:0.6rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);border-radius:4px;padding:1px 5px;margin-right:4px">FUTURES</span>`
+    : '';
   return `<div class="coin-card ${c.position ? 'has-position':''}" id="card-${sym}">
     <div class="coin-top">
-      <span class="coin-name">${COIN_EMOJI[sym]||''} ${sym}</span>
+      <span class="coin-name">${marketTag}${COIN_EMOJI[sym]||''} ${sym}</span>
       <span class="coin-price ${priceClass}">$${price}</span>
     </div>
     <div class="tf-row">
