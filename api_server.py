@@ -1,7 +1,7 @@
 """
-ICT Trading Bot — Full Implementation
-Strategy: HTF Bias → Liquidity Sweep → Structure Shift → FVG Entry → Next Liquidity TP
-Timeframes: 30D · 7D · 1D · 4H · 1H · 30M · 15M · 5M
+MSNR Trading Bot — Malaysian Support and Resistance
+Strategy: Key Level Detection → RBS/SBR Zone → Engulfing Confirmation → CHoCH + FVG Entry
+Timeframes: 1D · 4H · 1H · 15M · 5M
 """
 import asyncio
 import json
@@ -18,12 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("ict")
+log = logging.getLogger("msnr")
 
-HISTORY_FILE = 'trade_history.json'
-DEMO_BALANCE = 1_000.0
-TRADE_SIZE_USD = 100.0   # $100 מרג'ין קבוע לכל עסקה
-LEVERAGE      = 15        # 15x → פוזיציה של $1,500
+HISTORY_FILE  = 'trade_history.json'
+DEMO_BALANCE  = 1_000.0
+TRADE_SIZE_USD = 100.0   # $100 מרג'ין קבוע
+LEVERAGE       = 15       # 15× → פוזיציה $1,500
 
 # ─── CANDLE INTERVAL CONSTANTS (milliseconds) ────────────────────────────────
 MS_5M  =  5 * 60 * 1_000
@@ -43,26 +43,27 @@ COINS = {
     'cardano':     'ADA',
     'avalanche-2': 'AVAX',
 }
-SYMBOLS = list(COINS.values())
+SYMBOLS  = list(COINS.values())
 COIN_IDS = {v: k for k, v in COINS.items()}
 
 coin_state: dict[str, dict] = {
     sym: {
-        "position": None, "entry": 0.0, "amount": 0.0, "sl": 0.0, "tp": 0.0,
-        "liq_price": 0.0,   # מחיר חיסול (leverage)
-        "last_price": 0.0, "last_signal": "hold",
-        "fvg": None, "sweep": False, "bias": "range", "bos": False,
-        "score": 0,
-        # Per-timeframe breakdown
-        "bias_30d": "range", "bias_7d": "range", "bias_1d": "range",
-        "bos_4h": False, "bos_1h": False,
+        "position":   None,  "entry":    0.0, "amount":    0.0,
+        "sl":         0.0,   "tp":       0.0, "liq_price": 0.0,
+        "last_price": 0.0,   "last_signal": "hold",
+        "fvg":        None,  "score":    0,
+        # MSNR specific
+        "at_level":   False, "key_level": 0.0,
+        "engulfing":  None,  # 'bullish' | 'bearish' | None
+        "choch":      False,
+        "trend":      "range",
     }
     for sym in SYMBOLS
 }
 
 bot_state = {
-    "running": True,
-    "mode": "demo",
+    "running":      True,
+    "mode":         "demo",
     "demo_balance": DEMO_BALANCE,
 }
 
@@ -72,9 +73,8 @@ bot_state = {
 async def fetch_market_chart(coin_id: str, days: int) -> list:
     """
     CoinGecko market_chart → [[ts_ms, price], ...].
-    Auto granularity (free tier):
-      days=1   → ~5-min intervals  (~288 pts) → use for 5M / 15M / 30M
-      days≤90  → hourly intervals             → use for 1H / 4H / 1D / 7D / 30D
+      days=1   → ~5-min  intervals (~288 pts)
+      days≤90  → hourly  intervals
     """
     url = (f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
            f"?vs_currency=usd&days={days}")
@@ -85,19 +85,16 @@ async def fetch_market_chart(coin_id: str, days: int) -> list:
 
 
 def to_ohlc(prices: list, interval_ms: int) -> list[dict]:
-    """Resample price ticks [[ts_ms, price]] into OHLC candles."""
+    """Resample [[ts_ms, price]] ticks → OHLC candles."""
     if not prices:
         return []
     candles: dict[int, dict] = {}
     for ts, price in prices:
-        bucket = (int(ts) // interval_ms) * interval_ms
-        if bucket not in candles:
-            candles[bucket] = {
-                'ts': bucket, 'open': price,
-                'high': price, 'low': price, 'close': price,
-            }
+        b = (int(ts) // interval_ms) * interval_ms
+        if b not in candles:
+            candles[b] = {'ts': b, 'open': price, 'high': price, 'low': price, 'close': price}
         else:
-            c = candles[bucket]
+            c = candles[b]
             if price > c['high']: c['high'] = price
             if price < c['low']:  c['low']  = price
             c['close'] = price
@@ -112,27 +109,128 @@ async def fetch_price(coin_id: str) -> float:
 
 
 async def fetch_all_prices() -> dict[str, float]:
-    """Single CoinGecko call → prices for all 8 coins."""
     ids = ','.join(COINS.keys())
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(url)
         data = r.json()
-    result = {}
-    for coin_id, sym in COINS.items():
-        if coin_id in data and 'usd' in data[coin_id]:
-            result[sym] = data[coin_id]['usd']
-    return result
+    return {sym: data[cid]['usd'] for cid, sym in COINS.items()
+            if cid in data and 'usd' in data[cid]}
 
 
-# ─── ICT ENGINES ──────────────────────────────────────────────────────────────
+# ─── MSNR ENGINES ─────────────────────────────────────────────────────────────
 
-def get_bias(candles: list[dict]) -> str:
-    """Bullish if HH+HL, bearish if LH+LL, else range."""
+def detect_swing_levels(candles: list[dict], lookback: int = 3) -> tuple[list[float], list[float]]:
+    """
+    Identify swing highs (resistance) and swing lows (support) — the MSNR key levels.
+    Returns (resistances, supports).
+    """
+    resistances, supports = [], []
+    n = len(candles)
+    for i in range(lookback, n - lookback):
+        h = candles[i]['high']
+        l = candles[i]['low']
+        if all(h >= candles[j]['high'] for j in range(i - lookback, i + lookback + 1) if j != i):
+            resistances.append(h)
+        if all(l <= candles[j]['low']  for j in range(i - lookback, i + lookback + 1) if j != i):
+            supports.append(l)
+    return resistances, supports
+
+
+def cluster_levels(levels: list[float], tol: float = 0.006) -> list[float]:
+    """Merge nearby levels (within tol%) into one — keeps only significant levels."""
+    if not levels:
+        return []
+    clustered, seen = [], []
+    for lvl in sorted(levels):
+        if not any(abs(lvl - s) / max(s, 1) < tol for s in seen):
+            clustered.append(lvl)
+            seen.append(lvl)
+    return clustered
+
+
+def nearest_level(price: float, levels: list[float], tol: float = 0.018) -> tuple[bool, float]:
+    """Returns (at_level, level) if price is within tol% of any key level."""
+    best_dist, best_lvl = float('inf'), 0.0
+    for lvl in levels:
+        dist = abs(price - lvl) / max(lvl, 1)
+        if dist < tol and dist < best_dist:
+            best_dist = dist
+            best_lvl  = lvl
+    return (best_lvl > 0), best_lvl
+
+
+def detect_engulfing(candles: list[dict]) -> str | None:
+    """
+    Detect engulfing candle pattern on the last 2 candles.
+    Returns 'bullish', 'bearish', or None.
+    """
+    if len(candles) < 2:
+        return None
+    prev, curr = candles[-2], candles[-1]
+    prev_body = abs(prev['close'] - prev['open'])
+    curr_body = abs(curr['close'] - curr['open'])
+    if prev_body < 1e-9:
+        return None
+    # Bullish engulfing: curr fully engulfs prev bearish candle
+    if (curr['close'] > curr['open'] and
+        prev['close'] < prev['open'] and
+        curr['open']  <= prev['close'] and
+        curr['close'] >= prev['open']  and
+        curr_body > prev_body * 0.8):
+        return 'bullish'
+    # Bearish engulfing
+    if (curr['close'] < curr['open'] and
+        prev['close'] > prev['open'] and
+        curr['open']  >= prev['close'] and
+        curr['close'] <= prev['open']  and
+        curr_body > prev_body * 0.8):
+        return 'bearish'
+    return None
+
+
+def detect_choch(candles: list[dict]) -> bool:
+    """
+    Bullish Change of Character (CHoCH):
+    In a downtrend context, the last close breaks above the most recent
+    swing high → market structure shifts bullish.
+    """
+    if len(candles) < 8:
+        return False
+    recent = candles[-14:]
+    close  = recent[-1]['close']
+    # Find swing highs in the middle section (not the last 2 candles)
+    swing_highs = []
+    for i in range(2, len(recent) - 2):
+        if (recent[i]['high'] >= recent[i-1]['high'] and
+            recent[i]['high'] >= recent[i+1]['high'] and
+            recent[i]['high'] >= recent[i-2]['high']):
+            swing_highs.append(recent[i]['high'])
+    if not swing_highs:
+        return False
+    # CHoCH: current close breaks above the last swing high
+    return close > swing_highs[-1]
+
+
+def detect_fvg(candles: list[dict]) -> dict | None:
+    """Fair Value Gap — unfilled price imbalance area."""
+    for i in range(len(candles) - 1, 2, -1):
+        c1, c3 = candles[i - 2], candles[i]
+        if c3['low'] > c1['high']:
+            return {"type": "bullish", "low": c1['high'], "high": c3['low'],
+                    "mid": (c1['high'] + c3['low']) / 2}
+        if c3['high'] < c1['low']:
+            return {"type": "bearish", "low": c3['high'], "high": c1['low'],
+                    "mid": (c3['high'] + c1['low']) / 2}
+    return None
+
+
+def get_trend_1h(candles: list[dict]) -> str:
+    """1H trend: bullish (HH+HL), bearish (LH+LL), range."""
     if len(candles) < 4:
         return "range"
-    highs = [c['high'] for c in candles]
-    lows  = [c['low']  for c in candles]
+    highs = [c['high'] for c in candles[-8:]]
+    lows  = [c['low']  for c in candles[-8:]]
     hh = highs[-1] > highs[-2]
     hl = lows[-1]  > lows[-2]
     lh = highs[-1] < highs[-2]
@@ -142,145 +240,127 @@ def get_bias(candles: list[dict]) -> str:
     return "range"
 
 
-def swing_highs_lows(candles: list[dict], lookback: int = 3):
-    highs, lows = [], []
-    n = len(candles)
-    for i in range(lookback, n - lookback):
-        h = candles[i]['high']
-        l = candles[i]['low']
-        if all(h >= candles[j]['high'] for j in range(i - lookback, i + lookback + 1) if j != i):
-            highs.append((i, h))
-        if all(l <= candles[j]['low']  for j in range(i - lookback, i + lookback + 1) if j != i):
-            lows.append((i, l))
-    return highs, lows
+# ─── MSNR SIGNAL ENGINE ───────────────────────────────────────────────────────
 
-
-def detect_bos(candles: list[dict], swing_highs, swing_lows, bias: str) -> bool:
-    """Break of Structure: close > last swing high (bullish) or < last swing low (bearish)."""
-    if not candles:
-        return False
-    close = candles[-1]['close']
-    if bias == "bullish" and swing_highs:
-        return close > swing_highs[-1][1]
-    if bias == "bearish" and swing_lows:
-        return close < swing_lows[-1][1]
-    return False
-
-
-def detect_fvg(candles: list[dict]) -> dict | None:
-    """Latest Fair Value Gap in candle list."""
-    for i in range(len(candles) - 1, 2, -1):
-        c1, c3 = candles[i - 2], candles[i]
-        if c3['low'] > c1['high']:      # bullish FVG
-            return {"type": "bullish", "low": c1['high'], "high": c3['low'],
-                    "mid": (c1['high'] + c3['low']) / 2}
-        if c3['high'] < c1['low']:      # bearish FVG
-            return {"type": "bearish", "low": c3['high'], "high": c1['low'],
-                    "mid": (c3['high'] + c1['low']) / 2}
-    return None
-
-
-def detect_equal_levels(values: list[float], tolerance: float = 0.002) -> list[float]:
-    levels = []
-    for i in range(len(values)):
-        for j in range(i + 1, len(values)):
-            if abs(values[i] - values[j]) / max(values[i], 1) < tolerance:
-                levels.append((values[i] + values[j]) / 2)
-    return levels
-
-
-def detect_sweep(price: float, levels: list[float], tolerance: float = 0.003) -> tuple[bool, float]:
-    for lvl in levels:
-        if abs(price - lvl) / max(lvl, 1) < tolerance or price > lvl:
-            return True, lvl
-    return False, 0.0
-
-
-# ─── MULTI-TF SIGNAL ENGINE ───────────────────────────────────────────────────
-
-def generate_signal_mtf(
-    bias_30d: str, bias_7d: str, bias_1d: str,
-    bos_4h: bool, bos_1h: bool,
-    swept: bool, fvg: dict | None, price: float,
+def generate_signal_msnr(
+    at_level:  bool,
+    key_level: float,
+    engulfing: str | None,
+    choch:     bool,
+    fvg:       dict | None,
+    price:     float,
+    trend:     str,
 ) -> tuple[str, int]:
     """
-    ICT multi-timeframe score (max 10), threshold 6 → LONG entry.
+    MSNR Score (max 10), threshold 6 → LONG entry:
 
-    Bias alignment (top-down):
-      +2  30D daily bias bullish   (dominant monthly trend)
-      +1  7D  bias bullish         (weekly alignment)
-      +1  1D  bias bullish         (daily alignment)
+      At Key Level (RBS/Support zone):
+        +3  Price at HTF swing high/low level — the core MSNR zone
 
-    Structure:
-      +2  4H Break of Structure    (confirmed market shift)
-      +1  1H Break of Structure    (intraday confirmation)
+      Candle Confirmation:
+        +2  Bullish engulfing at the level
 
-    Liquidity:
-      +2  Sweep of equal highs/lows on 4H or 1H
+      Structure:
+        +2  CHoCH on 1H (Change of Character — structure shifts bullish)
 
-    Entry precision:
-      +1  Price inside bullish FVG on 30M / 15M / 5M
+      Entry Precision:
+        +2  Price inside bullish FVG (15M/5M)
+        +1  Bullish FVG exists nearby (not in it)
 
-    Bearish bias at any level subtracts points → prevents longs in downtrends.
+      Alignment:
+        +1  1H trend bullish
+
+    Bearish signals reduce score (prevents longs in downtrends).
     """
     score = 0
 
-    # Bias
-    if bias_30d == "bullish":   score += 2
-    elif bias_30d == "bearish": score -= 2
-    if bias_7d  == "bullish":   score += 1
-    elif bias_7d  == "bearish": score -= 1
-    if bias_1d  == "bullish":   score += 1
-    elif bias_1d  == "bearish": score -= 1
+    # ── Key Level (RBS zone) ──
+    if at_level:
+        score += 3
 
-    # Structure
-    if bos_4h: score += 2
-    if bos_1h: score += 1
+    # ── Engulfing ──
+    if engulfing == 'bullish':
+        score += 2
+    elif engulfing == 'bearish':
+        score -= 1
 
-    # Liquidity sweep
-    if swept: score += 2
+    # ── CHoCH ──
+    if choch:
+        score += 2
 
-    # FVG entry
-    if fvg and fvg['type'] == "bullish" and fvg['low'] <= price <= fvg['high']:
+    # ── FVG ──
+    if fvg and fvg['type'] == 'bullish':
+        if fvg['low'] <= price <= fvg['high']:
+            score += 2   # inside FVG
+        else:
+            score += 1   # FVG nearby
+
+    # ── Trend alignment ──
+    if trend == 'bullish':
         score += 1
+    elif trend == 'bearish':
+        score -= 1
 
     return ("buy", score) if score >= 6 else ("hold", score)
 
 
 # ─── RISK MANAGEMENT ──────────────────────────────────────────────────────────
 
-def calc_sl_tp(price: float, sweep_level: float, next_liq: float, bias: str):
-    """SL below liquidity sweep, TP at next liquidity target."""
-    if bias == "bullish":
-        sl = sweep_level * 0.998 if sweep_level else price * 0.98
-        tp = next_liq if next_liq > price else price * 1.04
+def calc_sl_tp_msnr(price: float, key_level: float, all_levels: list[float],
+                    engulf_low: float = 0.0) -> tuple[float, float]:
+    """
+    MSNR Risk Management:
+      SL: just below the key support level (0.3% buffer), or below engulfing candle low
+      TP: next resistance level above price — minimum 1:2.5 RR
+    """
+    # SL placement
+    if key_level > 0 and key_level < price:
+        sl = key_level * 0.997   # 0.3% below the key level
+    elif engulf_low > 0:
+        sl = engulf_low * 0.999  # just below engulfing candle low
     else:
-        sl = price * 1.02
-        tp = price * 0.96
+        sl = price * 0.98
+
+    risk   = price - sl
+    min_tp = price + risk * 2.5  # minimum 1:2.5 RR
+
+    # TP at next resistance level above price
+    next_res = sorted([lvl for lvl in all_levels if lvl > price * 1.005])
+    if next_res:
+        tp = next_res[0]
+        if tp < min_tp:
+            tp = min_tp
+    else:
+        tp = min_tp
+
     return sl, tp
 
 
 # ─── DEMO EXECUTION ───────────────────────────────────────────────────────────
 
 def demo_tick(sym: str, price: float, signal: str, sl: float, tp: float, score: int,
-              bias: str, sweep: bool, fvg, bos: bool,
-              bias_30d: str, bias_7d: str, bias_1d: str,
-              bos_4h: bool, bos_1h: bool):
+              trend: str, at_level: bool, fvg, choch: bool,
+              engulfing: str | None, key_level: float):
     cs = coin_state[sym]
     cs.update({
-        "last_price": price, "last_signal": signal, "score": score,
-        "bias": bias, "sweep": sweep, "fvg": fvg, "bos": bos,
-        "bias_30d": bias_30d, "bias_7d": bias_7d, "bias_1d": bias_1d,
-        "bos_4h": bos_4h, "bos_1h": bos_1h,
+        "last_price":  price,
+        "last_signal": signal,
+        "score":       score,
+        "trend":       trend,
+        "at_level":    at_level,
+        "key_level":   key_level,
+        "engulfing":   engulfing,
+        "choch":       choch,
+        "fvg":         fvg,
     })
 
     if not bot_state["running"]:
         return
 
-    # Exit check
+    # ── Exit checks ──
     if cs["position"] == "long":
-        if price <= cs["liq_price"] and cs["liq_price"] > 0:
-            _close(sym, price, "liquidated")          # margin wipe-out
+        if cs["liq_price"] > 0 and price <= cs["liq_price"]:
+            _close(sym, price, "liquidated")
         elif price <= cs["sl"]:
             _close(sym, price, "stop-loss")
         elif price >= cs["tp"]:
@@ -289,19 +369,20 @@ def demo_tick(sym: str, price: float, signal: str, sl: float, tp: float, score: 
             _close(sym, price, "signal-exit")
         return
 
-    # Entry — margin = TRADE_SIZE_USD, notional = margin × LEVERAGE
+    # ── Entry ──
     if signal == "buy" and cs["position"] is None and bot_state["demo_balance"] >= TRADE_SIZE_USD:
-        notional = TRADE_SIZE_USD * LEVERAGE          # $1,500 position size
-        amount   = notional / price                   # units of coin
-        liq_price = price * (1 - 1 / LEVERAGE + 0.001)  # ~93.4% of entry for 15x
+        notional  = TRADE_SIZE_USD * LEVERAGE
+        amount    = notional / price
+        liq_price = price * (1 - 1 / LEVERAGE + 0.001)
         cs.update({
             "amount": amount, "entry": price, "position": "long",
             "sl": sl, "tp": tp, "liq_price": liq_price,
         })
-        bot_state["demo_balance"] -= TRADE_SIZE_USD   # deduct margin only
+        bot_state["demo_balance"] -= TRADE_SIZE_USD
         log.info(
-            f"[BUY 15x] {sym} @ ${price:.4f}  "
-            f"notional=${notional:.0f}  SL=${sl:.4f}  TP=${tp:.4f}  LIQ=${liq_price:.4f}  score={score}/10"
+            f"[BUY 15×] {sym} @ ${price:.4f}  "
+            f"notional=${notional:.0f}  SL=${sl:.4f}  TP=${tp:.4f}  "
+            f"LIQ=${liq_price:.4f}  score={score}/10"
         )
 
 
@@ -330,7 +411,8 @@ def _close(sym: str, price: float, reason: str):
         "leverage":   LEVERAGE,
     })
     save_history(h)
-    cs.update({"position": None, "entry": 0.0, "amount": 0.0, "sl": 0.0, "tp": 0.0})
+    cs.update({"position": None, "entry": 0.0, "amount": 0.0,
+               "sl": 0.0, "tp": 0.0, "liq_price": 0.0})
     emoji = "✅" if profit_pct > 0 else "❌"
     log.info(f"[{emoji}] {sym} {reason}  {profit_pct:+.2%}  balance=${bot_state['demo_balance']:.2f}")
 
@@ -339,102 +421,72 @@ def _close(sym: str, price: float, reason: str):
 
 async def analyze_coin(sym: str):
     """
-    8-timeframe ICT analysis per coin:
-      chart_30d (hourly ticks) → daily OHLC  → 30D / 7D / 1D bias
-      chart_7d  (hourly ticks) → 4H / 1H     → BOS + liquidity sweep
-      chart_1d  (5-min  ticks) → 30M / 15M / 5M → FVG entry
+    MSNR Full Analysis:
+      chart_30d (hourly) → 1D / 4H  → swing-based key S/R levels
+      chart_7d  (hourly) → 1H        → trend + CHoCH
+      chart_1d  (5-min)  → 15M / 5M  → engulfing + FVG entry
     """
     coin_id = COIN_IDS[sym]
     try:
-        # 3 concurrent API calls cover all 8 timeframes
         chart_30d, chart_7d, chart_1d = await asyncio.gather(
-            fetch_market_chart(coin_id, 30),   # hourly → 1D/7D/30D
-            fetch_market_chart(coin_id, 7),    # hourly → 4H/1H
-            fetch_market_chart(coin_id, 1),    # 5-min  → 30M/15M/5M
+            fetch_market_chart(coin_id, 30),
+            fetch_market_chart(coin_id, 7),
+            fetch_market_chart(coin_id, 1),
         )
 
-        # ── Resample to all 8 timeframes ────────────────────────────────────
-        tf_1d  = to_ohlc(chart_30d, MS_1D)   # daily  (30 candles)
-        tf_4h  = to_ohlc(chart_7d,  MS_4H)   # 4-hour (42 candles)
-        tf_1h  = to_ohlc(chart_7d,  MS_1H)   # 1-hour (168 candles)
-        tf_30m = to_ohlc(chart_1d,  MS_30M)  # 30-min (48 candles)
-        tf_15m = to_ohlc(chart_1d,  MS_15M)  # 15-min (96 candles)
-        tf_5m  = to_ohlc(chart_1d,  MS_5M)   # 5-min  (288 candles)
+        tf_1d  = to_ohlc(chart_30d, MS_1D)
+        tf_4h  = to_ohlc(chart_30d, MS_4H)
+        tf_1h  = to_ohlc(chart_7d,  MS_1H)
+        tf_15m = to_ohlc(chart_1d,  MS_15M)
+        tf_5m  = to_ohlc(chart_1d,  MS_5M)
 
         if not tf_1d or not tf_4h or not tf_1h:
             return
 
-        # Cached price (updated every 30s by price_loop)
         price = coin_state[sym]["last_price"]
         if price == 0.0:
             price = await fetch_price(coin_id)
             coin_state[sym]["last_price"] = price
 
-        # ── BIAS: top-down across 30D / 7D / 1D ─────────────────────────────
-        bias_30d = get_bias(tf_1d)                                         # all 30 daily candles
-        bias_7d  = get_bias(tf_1d[-7:]  if len(tf_1d)  >= 7  else tf_1d)  # last 7 daily
-        bias_1d  = get_bias(tf_4h[-6:]  if len(tf_4h)  >= 6  else tf_4h)  # last 6×4H ≈ 1 day
+        # ── 1. HTF Key Levels (1D + 4H swing highs/lows) ─────────────────
+        res_1d, sup_1d = detect_swing_levels(tf_1d,  lookback=2)
+        res_4h, sup_4h = detect_swing_levels(tf_4h,  lookback=3)
+        all_levels = cluster_levels(res_1d + res_4h + sup_1d + sup_4h)
 
-        # Majority vote for dominant bias
-        votes = [bias_30d, bias_7d, bias_1d]
-        bias  = max(set(votes), key=votes.count)
+        # ── 2. Is price at an MSNR key level? ────────────────────────────
+        at_level, key_level = nearest_level(price, all_levels)
 
-        # ── STRUCTURE: BOS on 4H and 1H ──────────────────────────────────────
-        sh_4h, sl_4h = swing_highs_lows(tf_4h)
-        sh_1h, sl_1h = swing_highs_lows(tf_1h)
-        bos_4h = detect_bos(tf_4h, sh_4h, sl_4h, bias)
-        bos_1h = detect_bos(tf_1h, sh_1h, sl_1h, bias)
+        # ── 3. 1H Trend ───────────────────────────────────────────────────
+        trend = get_trend_1h(tf_1h)
 
-        # ── LIQUIDITY: equal highs/lows + sweep on 4H (primary) + 1H ────────
-        highs_4h = [c['high'] for c in tf_4h[-40:]]
-        lows_4h  = [c['low']  for c in tf_4h[-40:]]
-        eq_highs_4h = detect_equal_levels(highs_4h)
-        eq_lows_4h  = detect_equal_levels(lows_4h)
+        # ── 4. CHoCH on 1H ────────────────────────────────────────────────
+        choch = detect_choch(tf_1h)
 
-        highs_1h = [c['high'] for c in tf_1h[-30:]]
-        lows_1h  = [c['low']  for c in tf_1h[-30:]]
-        eq_highs_1h = detect_equal_levels(highs_1h)
-        eq_lows_1h  = detect_equal_levels(lows_1h)
+        # ── 5. Engulfing on 15M ───────────────────────────────────────────
+        engulfing = detect_engulfing(tf_15m[-5:]) if tf_15m else None
 
-        liq_4h = eq_highs_4h if bias == "bullish" else eq_lows_4h
-        liq_1h = eq_highs_1h if bias == "bullish" else eq_lows_1h
+        # ── 6. FVG: 15M → 5M ─────────────────────────────────────────────
+        fvg = (detect_fvg(tf_15m[-20:]) if tf_15m else None) or \
+              (detect_fvg(tf_5m[-20:])  if tf_5m  else None)
 
-        swept_4h, sweep_lvl_4h = detect_sweep(price, liq_4h)
-        swept_1h, sweep_lvl_1h = detect_sweep(price, liq_1h)
-        swept       = swept_4h or swept_1h
-        sweep_level = sweep_lvl_4h if swept_4h else sweep_lvl_1h
-
-        # ── FVG: 30M → 15M → 5M (best available precision) ──────────────────
-        fvg = (
-            detect_fvg(tf_30m[-30:]) or
-            detect_fvg(tf_15m[-30:]) or
-            detect_fvg(tf_5m[-30:])
+        # ── 7. MSNR Signal ────────────────────────────────────────────────
+        signal, score = generate_signal_msnr(
+            at_level, key_level, engulfing, choch, fvg, price, trend
         )
 
-        # ── SIGNAL ───────────────────────────────────────────────────────────
-        signal, score = generate_signal_mtf(
-            bias_30d, bias_7d, bias_1d,
-            bos_4h, bos_1h,
-            swept, fvg, price,
-        )
+        # ── 8. SL / TP ────────────────────────────────────────────────────
+        engulf_low = tf_15m[-1]['low'] if (engulfing == 'bullish' and tf_15m) else 0.0
+        sl, tp = calc_sl_tp_msnr(price, key_level, all_levels, engulf_low)
 
-        # ── SL / TP ──────────────────────────────────────────────────────────
-        all_eq_highs = eq_highs_4h + eq_highs_1h
-        next_liq = max(all_eq_highs) if all_eq_highs else price * 1.04
-        sl, tp = calc_sl_tp(price, sweep_level, next_liq, bias)
-
-        # ── EXECUTE ──────────────────────────────────────────────────────────
-        demo_tick(
-            sym, price, signal, sl, tp, score,
-            bias, swept, fvg, bos_4h or bos_1h,
-            bias_30d, bias_7d, bias_1d, bos_4h, bos_1h,
-        )
+        # ── 9. Execute ────────────────────────────────────────────────────
+        demo_tick(sym, price, signal, sl, tp, score,
+                  trend, at_level, fvg, choch, engulfing, key_level)
 
         log.info(
             f"{sym} ${price:,.2f} | "
-            f"30D={bias_30d} 7D={bias_7d} 1D={bias_1d} | "
-            f"4H-BOS={bos_4h} 1H-BOS={bos_1h} sweep={swept} | "
-            f"FVG={'✓' if fvg else '✗'} | score={score}/10 → {signal}"
+            f"level={key_level:.2f}({'✓' if at_level else '✗'}) | "
+            f"trend={trend} choch={choch} engulf={engulfing} fvg={'✓' if fvg else '✗'} | "
+            f"score={score}/10 → {signal}"
         )
 
     except Exception as e:
@@ -442,7 +494,7 @@ async def analyze_coin(sym: str):
 
 
 async def price_loop():
-    """Fast loop — batch price update for all 8 coins every 30 seconds."""
+    """Batch-fetch all prices every 30s — keeps dashboard live."""
     log.info("Price loop started")
     while True:
         try:
@@ -457,22 +509,21 @@ async def price_loop():
 
 
 async def trading_loop():
-    """ICT analysis loop — 8 timeframes per coin, 15s spacing to respect rate limits."""
-    log.info("ICT Trading loop started  [30D · 7D · 1D · 4H · 1H · 30M · 15M · 5M]")
-    # Prices before first analysis cycle
+    """MSNR analysis — 1D/4H/1H/15M/5M per coin, 15s spacing."""
+    log.info("MSNR Trading loop started  [1D · 4H · 1H · 15M · 5M]")
     try:
         prices = await fetch_all_prices()
         for sym, p in prices.items():
             if p > 0:
                 coin_state[sym]["last_price"] = p
     except Exception as e:
-        log.warning(f"Initial price fetch failed: {e}")
+        log.warning(f"Initial price fetch: {e}")
 
     while True:
         for sym in SYMBOLS:
             await analyze_coin(sym)
-            await asyncio.sleep(15)   # 15s × 8 coins = 2 min per full cycle
-        await asyncio.sleep(30)       # rest between cycles
+            await asyncio.sleep(15)
+        await asyncio.sleep(30)
 
 
 # ─── APP ──────────────────────────────────────────────────────────────────────
@@ -490,21 +541,20 @@ def save_history(h: list):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    t1 = asyncio.create_task(price_loop())    # fast  — prices every 30s
-    t2 = asyncio.create_task(trading_loop())  # slow  — ICT analysis per coin
+    t1 = asyncio.create_task(price_loop())
+    t2 = asyncio.create_task(trading_loop())
     yield
-    t1.cancel()
-    t2.cancel()
+    t1.cancel(); t2.cancel()
 
 
-app = FastAPI(title="ICT Trading Bot", lifespan=lifespan)
+app = FastAPI(title="MSNR Trading Bot", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.get("/status")
 def status():
     h = load_history()
-    wins = [t for t in h if t.get("profit", 0) > 0]
+    wins     = [t for t in h if t.get("profit", 0) > 0]
     total_pnl = sum(t.get("profit_usd", 0) for t in h)
     return {
         **bot_state,
@@ -515,6 +565,7 @@ def status():
         "total_profit":   round(total_pnl, 2),
         "leverage":       LEVERAGE,
         "trade_size":     TRADE_SIZE_USD,
+        "strategy":       "MSNR",
     }
 
 
@@ -534,14 +585,14 @@ def stop():
 def reset_demo():
     bot_state.update({"demo_balance": DEMO_BALANCE, "running": True})
     for cs in coin_state.values():
-        cs.update({"position": None, "entry": 0.0, "amount": 0.0, "sl": 0.0, "tp": 0.0})
+        cs.update({"position": None, "entry": 0.0, "amount": 0.0,
+                   "sl": 0.0, "tp": 0.0, "liq_price": 0.0})
     save_history([])
     return {"status": "reset"}
 
 
 @app.get("/positions")
 def positions_endpoint():
-    """פוזיציות פתוחות עם P&L חי, מינוף, מחיר חיסול — הכל בדולרים."""
     result = []
     for sym, cs in coin_state.items():
         if cs["position"] == "long":
@@ -549,29 +600,28 @@ def positions_endpoint():
             entry       = cs["entry"]
             amount      = cs["amount"]
             margin      = TRADE_SIZE_USD
-            notional    = margin * LEVERAGE            # $1,500 notional
             current_val = amount * price
-            cost_val    = amount * entry               # = notional at entry
+            cost_val    = amount * entry
             pnl_usd     = current_val - cost_val
             pnl_pct     = (price - entry) / entry if entry else 0
-            # Distance to liquidation
-            liq = cs["liq_price"]
-            dist_liq_pct = (price - liq) / price * 100 if liq else 0
+            liq         = cs["liq_price"]
+            dist_liq    = (price - liq) / price * 100 if liq else 0
             result.append({
                 "symbol":        sym,
-                "entry":         round(entry,        4),
-                "current_price": round(price,        4),
-                "margin_used":   round(margin,       2),
-                "notional":      round(notional,     2),
-                "current_value": round(current_val,  2),
-                "pnl_usd":       round(pnl_usd,      2),
-                "pnl_pct":       round(pnl_pct * 100, 2),
-                "sl":            round(cs["sl"],     4),
-                "tp":            round(cs["tp"],     4),
-                "liq_price":     round(liq,          4),
-                "dist_liq_pct":  round(dist_liq_pct, 2),
+                "entry":         round(entry,              4),
+                "current_price": round(price,              4),
+                "margin_used":   round(margin,             2),
+                "notional":      round(margin * LEVERAGE,  2),
+                "current_value": round(current_val,        2),
+                "pnl_usd":       round(pnl_usd,            2),
+                "pnl_pct":       round(pnl_pct * 100,      2),
+                "sl":            round(cs["sl"],            4),
+                "tp":            round(cs["tp"],            4),
+                "liq_price":     round(liq,                 4),
+                "dist_liq_pct":  round(dist_liq,            2),
                 "score":         cs["score"],
                 "leverage":      LEVERAGE,
+                "key_level":     round(cs["key_level"],     4),
             })
     return result
 
@@ -580,23 +630,20 @@ def positions_endpoint():
 def coins_endpoint():
     return [
         {
-            "symbol":   s,
-            "price":    coin_state[s]["last_price"],
-            "signal":   coin_state[s]["last_signal"],
-            "position": coin_state[s]["position"],
-            "entry":    coin_state[s]["entry"],
-            "sl":       coin_state[s]["sl"],
-            "tp":       coin_state[s]["tp"],
-            "bias":     coin_state[s]["bias"],
-            "bias_30d": coin_state[s]["bias_30d"],
-            "bias_7d":  coin_state[s]["bias_7d"],
-            "bias_1d":  coin_state[s]["bias_1d"],
-            "sweep":    coin_state[s]["sweep"],
-            "bos":      coin_state[s]["bos"],
-            "bos_4h":   coin_state[s]["bos_4h"],
-            "bos_1h":   coin_state[s]["bos_1h"],
-            "score":    coin_state[s]["score"],
-            "fvg":      coin_state[s]["fvg"] is not None,
+            "symbol":    s,
+            "price":     coin_state[s]["last_price"],
+            "signal":    coin_state[s]["last_signal"],
+            "position":  coin_state[s]["position"],
+            "entry":     coin_state[s]["entry"],
+            "sl":        coin_state[s]["sl"],
+            "tp":        coin_state[s]["tp"],
+            "score":     coin_state[s]["score"],
+            "trend":     coin_state[s]["trend"],
+            "at_level":  coin_state[s]["at_level"],
+            "key_level": coin_state[s]["key_level"],
+            "engulfing": coin_state[s]["engulfing"],
+            "choch":     coin_state[s]["choch"],
+            "fvg":       coin_state[s]["fvg"] is not None,
         }
         for s in SYMBOLS
     ]
@@ -611,7 +658,7 @@ def history_endpoint():
 def dashboard():
     if os.path.exists("dashboard.html"):
         return open("dashboard.html").read()
-    return HTMLResponse("<h1>ICT Bot running</h1>")
+    return HTMLResponse("<h1>MSNR Bot running</h1>")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ICT Trading Terminal</title>
+<title>MSNR Trading Terminal</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -263,7 +263,7 @@ tr:hover td { background: rgba(0,212,255,0.03); }
 <!-- ── HEADER ── -->
 <div class="header">
   <div class="logo">
-    <span class="logo-icon">🧠</span> ICT Trading Terminal
+    <span class="logo-icon">🎯</span> MSNR Trading Terminal
   </div>
   <div class="header-right">
     <span class="demo-tag">🎮 DEMO</span>
@@ -300,7 +300,7 @@ tr:hover td { background: rgba(0,212,255,0.03); }
   <div class="stat-card">
     <div class="stat-label">🔢 סך עסקאות</div>
     <div class="stat-value white" id="sTrades">0</div>
-    <div class="stat-sub" id="sSubStrategy">ICT · 30D 7D 1D 4H 1H 30M 15M 5M · סף 6/10</div>
+    <div class="stat-sub" id="sSubStrategy">MSNR · 1D 4H 1H 15M 5M · סף כניסה 6/10</div>
   </div>
 </div>
 
@@ -319,7 +319,7 @@ tr:hover td { background: rgba(0,212,255,0.03); }
 
 <!-- ── COIN CARDS GRID ── -->
 <div class="section">
-  <div class="section-title">📊 ניתוח ICT — 8 טיימפריימים</div>
+  <div class="section-title">📊 ניתוח MSNR — Malaysian S&R</div>
   <div class="coins-grid" id="coinsGrid"></div>
 </div>
 
@@ -452,6 +452,22 @@ function drawBTC(data) {
 }
 
 // ── COIN CARD ─────────────────────────────────────────────────────────
+function trendPill(t) {
+  const cls = t==='bullish'?'tf-bull':t==='bearish'?'tf-bear':'tf-flat';
+  const arrow = t==='bullish'?'▲ שורי':t==='bearish'?'▼ דובי':'— ניטרל';
+  return `<span class="tf-pill ${cls}">1H ${arrow}</span>`;
+}
+function levelBadge(at, level, price) {
+  if (!at || !level) return `<span class="sig-badge sig-off">Key Level —</span>`;
+  const pct = ((price - level) / level * 100).toFixed(1);
+  return `<span class="sig-badge sig-on" title="רמה: $${level.toLocaleString(undefined,{maximumFractionDigits:2})}">🎯 Level +${pct}%</span>`;
+}
+function engulfBadge(e) {
+  if (e==='bullish') return `<span class="sig-badge sig-on">🕯 Engulf ✓</span>`;
+  if (e==='bearish') return `<span class="sig-badge" style="background:rgba(255,68,102,0.12);color:#ff4466;border:1px solid rgba(255,68,102,0.3)">🕯 Engulf ↓</span>`;
+  return `<span class="sig-badge sig-off">Engulf —</span>`;
+}
+
 function coinCard(c) {
   const sym   = c.symbol;
   const price = c.price ? c.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4}) : '—';
@@ -465,14 +481,12 @@ function coinCard(c) {
       <span class="coin-price ${priceClass}">$${price}</span>
     </div>
     <div class="tf-row">
-      <span class="tf-pill ${tfClass(c.bias_30d||c.bias)}">30D ${tfArrow(c.bias_30d||c.bias)}</span>
-      <span class="tf-pill ${tfClass(c.bias_7d||c.bias)}">7D ${tfArrow(c.bias_7d||c.bias)}</span>
-      <span class="tf-pill ${tfClass(c.bias_1d||c.bias)}">1D ${tfArrow(c.bias_1d||c.bias)}</span>
+      ${trendPill(c.trend||'range')}
+      ${levelBadge(c.at_level, c.key_level, c.price||0)}
     </div>
     <div class="badge-row">
-      <span class="sig-badge ${c.bos_4h?'sig-on':'sig-off'}">BOS 4H ${c.bos_4h?'✓':'—'}</span>
-      <span class="sig-badge ${c.bos_1h?'sig-on':'sig-off'}">BOS 1H ${c.bos_1h?'✓':'—'}</span>
-      <span class="sig-badge ${c.sweep?'sig-on':'sig-off'}">Sweep ${c.sweep?'✓':'—'}</span>
+      ${engulfBadge(c.engulfing)}
+      <span class="sig-badge ${c.choch?'sig-on':'sig-off'}">CHoCH ${c.choch?'✓':'—'}</span>
       <span class="sig-badge ${c.fvg?'sig-on':'sig-off'}">FVG ${c.fvg?'✓':'—'}</span>
     </div>
     <div class="coin-bottom">
@@ -481,7 +495,7 @@ function coinCard(c) {
         <span class="score-label">סקור/10</span>
       </div>
       <button class="signal-btn ${hasSig?'sig-buy':'sig-hold'}">
-        ${hasSig ? '🟢 קנה ← ICT' : '⏸ המתן'}
+        ${hasSig ? '🟢 קנה ← MSNR' : '⏸ המתן'}
       </button>
     </div>
     <canvas class="sparkline" id="spark-${sym}"></canvas>
@@ -643,25 +657,16 @@ function updateCoins(coins) {
         sigBtn.className = 'signal-btn ' + (buy ? 'sig-buy' : 'sig-hold');
         sigBtn.textContent = buy ? '🟢 קנה ← ICT' : '⏸ המתן';
       }
-      // TF pills
-      const pills = card.querySelectorAll('.tf-pill');
-      if (pills.length === 3) {
-        const biases = [c.bias_30d||c.bias, c.bias_7d||c.bias, c.bias_1d||c.bias];
-        const labels = ['30D','7D','1D'];
-        pills.forEach((p,i) => {
-          p.className = 'tf-pill ' + tfClass(biases[i]);
-          p.textContent = labels[i] + ' ' + tfArrow(biases[i]);
-        });
-      }
-      // Badges
-      const badges = card.querySelectorAll('.sig-badge');
-      if (badges.length === 4) {
-        const states = [c.bos_4h, c.bos_1h, c.sweep, c.fvg];
-        const names  = ['BOS 4H','BOS 1H','Sweep','FVG'];
-        badges.forEach((b,i) => {
-          b.className = 'sig-badge ' + (states[i] ? 'sig-on' : 'sig-off');
-          b.textContent = names[i] + ' ' + (states[i] ? '✓' : '—');
-        });
+      // TF row (trend + key level)
+      const tfRow = card.querySelector('.tf-row');
+      if (tfRow) tfRow.innerHTML = trendPill(c.trend||'range') + levelBadge(c.at_level, c.key_level, c.price||0);
+      // Badge row (engulf + CHoCH + FVG)
+      const badgeRow = card.querySelector('.badge-row');
+      if (badgeRow) {
+        badgeRow.innerHTML =
+          engulfBadge(c.engulfing) +
+          `<span class="sig-badge ${c.choch?'sig-on':'sig-off'}">CHoCH ${c.choch?'✓':'—'}</span>` +
+          `<span class="sig-badge ${c.fvg?'sig-on':'sig-off'}">FVG ${c.fvg?'✓':'—'}</span>`;
       }
     });
   }
@@ -700,8 +705,8 @@ async function poll() {
     updateStats(status);
     updateCoins(coins);
     document.getElementById('logBar').textContent =
-      'ICT Terminal ✓  עודכן: ' + new Date().toLocaleTimeString('he-IL') +
-      '  |  8 טיימפריימים: 30D 7D 1D 4H 1H 30M 15M 5M  |  ⚡ מינוף 15×';
+      'MSNR Terminal ✓  עודכן: ' + new Date().toLocaleTimeString('he-IL') +
+      '  |  Malaysian S&R · Key Level → Engulfing → CHoCH → FVG  |  ⚡ מינוף 15×';
   } catch(e) {
     document.getElementById('logBar').textContent = '⚠ שגיאת חיבור — מנסה שוב...';
   }
